@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aws-network": {
+      "command": "python",
+      "args": ["-m", "aws_network_mcp.server"],
+      "env": {
+        "AWS_NETWORK_MCP_DEMO": "true"
+      }
+    }
+  }
+}
