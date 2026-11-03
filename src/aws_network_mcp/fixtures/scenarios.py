@@ -46,9 +46,7 @@ def _scenario_missing_tgw_propagation() -> tuple[DemoScenario, NetworkTopology]:
 
     dev_tgw_rt = topology.tgw_route_tables[DemoTopology.TGW_RT_DEV]
     new_routes = tuple(
-        r
-        for r in dev_tgw_rt.routes
-        if r.destination_cidr not in ("10.1.0.0/16", "0.0.0.0/0")
+        r for r in dev_tgw_rt.routes if r.destination_cidr not in ("10.1.0.0/16", "0.0.0.0/0")
     )
     new_propagations = tuple(p for p in dev_tgw_rt.propagations if p != DemoTopology.TGW_ATT_PROD)
     topology.tgw_route_tables[DemoTopology.TGW_RT_DEV] = TgwRouteTableInfo(

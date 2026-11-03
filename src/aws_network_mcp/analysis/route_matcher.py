@@ -50,10 +50,9 @@ class RouteMatcher:
             inner_net = ipaddress.ip_network(inner, strict=False)
             if outer_net.version != inner_net.version:
                 return False
-            return (
-                int(inner_net.network_address) >= int(outer_net.network_address)
-                and int(inner_net.broadcast_address) <= int(outer_net.broadcast_address)
-            )
+            return int(inner_net.network_address) >= int(outer_net.network_address) and int(
+                inner_net.broadcast_address
+            ) <= int(outer_net.broadcast_address)
         except ValueError:
             return False
 
