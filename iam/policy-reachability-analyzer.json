@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReachabilityAnalyzerAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInsightsPath",
+        "ec2:DeleteNetworkInsightsPath",
+        "ec2:StartNetworkInsightsAnalysis",
+        "ec2:DescribeNetworkInsightsPaths",
+        "ec2:DescribeNetworkInsightsAnalyses"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
