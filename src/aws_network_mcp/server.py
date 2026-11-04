@@ -14,7 +14,9 @@ from mcp.server import MCPServer
 from aws_network_mcp.analysis.path_analyzer import NetworkTopology
 from aws_network_mcp.aws_client.ec2_client import EC2Client
 from aws_network_mcp.aws_client.logs_client import CloudWatchLogsClient
+from aws_network_mcp.aws_client.nfw_client import NetworkFirewallClient
 from aws_network_mcp.aws_client.route53_client import Route53ResolverClient
+from aws_network_mcp.aws_client.topology_loader import LiveTopologyLoader
 from aws_network_mcp.fixtures.scenarios import DEMO_SCENARIOS, get_scenario
 from aws_network_mcp.fixtures.topology import load_demo_topology
 from aws_network_mcp.tools.connectivity import (
@@ -47,6 +49,7 @@ class ServerRuntime:
         env_demo = os.environ.get("AWS_NETWORK_MCP_DEMO", "").lower() == "true"
         self.demo_mode = env_demo if demo_mode is None else demo_mode
         self.ec2_client: EC2Client | None = None
+        self.nfw_client: NetworkFirewallClient | None = None
         self.route53_client: Route53ResolverClient | None = None
         self.logs_client: CloudWatchLogsClient | None = None
         self.topology: NetworkTopology | None = None
@@ -59,9 +62,11 @@ class ServerRuntime:
 
         try:
             self.ec2_client = EC2Client()
+            self.nfw_client = NetworkFirewallClient()
             self.route53_client = Route53ResolverClient()
             self.logs_client = CloudWatchLogsClient()
-            logger.info("Connected to AWS APIs")
+            self.topology = LiveTopologyLoader(self.ec2_client, self.nfw_client).load()
+            logger.info("Connected to AWS APIs and loaded live topology")
         except Exception as exc:
             logger.warning("Could not connect to AWS: %s. Falling back to demo mode.", exc)
             self.demo_mode = True

@@ -71,3 +71,28 @@ class TestFirewallEvaluator:
         assert rule is not None
         deny, _, _ = evaluator.evaluate(policy, "10.10.0.10", "10.1.0.10", 443, Protocol.TCP)
         assert deny == Verdict.DENY
+
+    def test_dest_port_must_match(self) -> None:
+        policy = FirewallPolicy(
+            policy_id="fw-1",
+            name="ports",
+            rule_order="STRICT_ORDER",
+            default_action="aws:drop_established",
+            rules=(
+                FirewallRule(
+                    "1",
+                    "pass",
+                    "tcp",
+                    ("10.10.0.0/24",),
+                    ("10.1.0.0/24",),
+                    dest_ports=("443",),
+                    message="https only",
+                ),
+            ),
+        )
+        evaluator = FirewallEvaluator()
+        allow, _, _ = evaluator.evaluate(policy, "10.10.0.10", "10.1.0.10", 443, Protocol.TCP)
+        assert allow == Verdict.ALLOW
+        drop, _, rule = evaluator.evaluate(policy, "10.10.0.10", "10.1.0.10", 80, Protocol.TCP)
+        assert drop == Verdict.DENY
+        assert rule is None

@@ -29,6 +29,25 @@ class FirewallEvaluator:
         matched = any(self._matcher.ip_matches_cidr(ip, cidr) for cidr in cidrs)
         return (not matched) if negate else matched
 
+    def _port_matches(self, port: int, dest_ports: tuple[str, ...]) -> bool:
+        if not dest_ports or "any" in dest_ports:
+            return True
+        for spec in dest_ports:
+            if ":" in spec:
+                start_s, end_s = spec.split(":", 1)
+                try:
+                    if int(start_s) <= port <= int(end_s):
+                        return True
+                except ValueError:
+                    continue
+            else:
+                try:
+                    if port == int(spec):
+                        return True
+                except ValueError:
+                    continue
+        return False
+
     def evaluate(
         self,
         policy: FirewallPolicy,
@@ -41,9 +60,11 @@ class FirewallEvaluator:
         for rule in policy.rules:
             if not self._protocol_matches(rule.protocol, protocol):
                 continue
-            if not self._cidrs_match(source_ip, rule.source_cidrs):
+            if not self._cidrs_match(source_ip, rule.source_cidrs, negate=rule.source_negate):
                 continue
             if not self._cidrs_match(dest_ip, rule.dest_cidrs, negate=rule.dest_negate):
+                continue
+            if not self._port_matches(port, rule.dest_ports):
                 continue
 
             if rule.action == "pass":

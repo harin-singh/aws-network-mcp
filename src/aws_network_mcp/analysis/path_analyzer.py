@@ -50,12 +50,17 @@ class NetworkTopology:
     vpn_attachment_id: str | None = None
     known_endpoints: dict[str, NetworkEndpoint] = field(default_factory=dict)
     on_prem_cidrs: tuple[str, ...] = ()
+    vpc_cidrs: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    load_warnings: tuple[str, ...] = ()
 
     def resolve_endpoint(self, ip: str) -> NetworkEndpoint:
         """Resolve an IP to a known endpoint, or classify it as on-prem/external."""
         if ip in self.known_endpoints:
             return self.known_endpoints[ip]
         matcher = RouteMatcher()
+        for vpc_id, cidrs in self.vpc_cidrs.items():
+            if any(matcher.ip_matches_cidr(ip, cidr) for cidr in cidrs):
+                return NetworkEndpoint(ip=ip, vpc_id=vpc_id)
         for cidr in self.on_prem_cidrs:
             if matcher.ip_matches_cidr(ip, cidr):
                 return NetworkEndpoint(ip=ip, is_on_prem=True)
@@ -117,12 +122,12 @@ class PathAnalyzer:
         if source_route_hop.verdict in (Verdict.DENY, Verdict.BLACKHOLE):
             return self._deny(result, source_route_hop, "Blocked at source routing")
 
-        source_vpc = self.topology.subnet_to_vpc.get(source.subnet_id)
+        source_vpc = self.topology.subnet_to_vpc.get(source.subnet_id) or source.vpc_id
         dest_vpc = (
             self.topology.subnet_to_vpc.get(destination.subnet_id)
             if destination.subnet_id
             else None
-        )
+        ) or destination.vpc_id
 
         needs_tgw_check = (
             (source_vpc and dest_vpc and source_vpc != dest_vpc)
@@ -152,7 +157,7 @@ class PathAnalyzer:
                 if blocking:
                     return self._deny(result, blocking, "Blocked at Transit Gateway / inspection")
 
-        if destination.is_on_prem or not destination.subnet_id:
+        if destination.is_on_prem or (not destination.subnet_id and not dest_vpc):
             on_prem_hop = HopAnalysis(
                 hop_type="on_prem",
                 resource_id=destination.ip,

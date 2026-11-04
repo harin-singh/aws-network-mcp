@@ -50,6 +50,7 @@ dev = [
     "boto3-stubs[ec2,route53resolver,logs,network-firewall]==1.43.123",
     "types-pyyaml==6.0.12.20250915",
     "pip-audit==2.10.0",
+    "setuptools==84.2.1",
 ]
 
 [project.scripts]

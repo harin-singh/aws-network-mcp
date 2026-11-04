@@ -149,8 +149,10 @@ def describe_path(
         }
 
     analyzer = PathAnalyzer(topology)
-    result = analyzer.analyze_path(source, dest, port, protocol_enum)
-    return _format_result(result)
+    formatted = _format_result(analyzer.analyze_path(source, dest, port, protocol_enum))
+    if topology.load_warnings:
+        formatted["topology_warnings"] = list(topology.load_warnings)
+    return formatted
 
 
 def explain_connectivity(

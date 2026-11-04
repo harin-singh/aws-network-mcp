@@ -148,6 +148,7 @@ class TgwAttachment:
     resource_id: str
     resource_owner_id: str
     name: str | None = None
+    associated_route_table_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +198,7 @@ class VpnConnectionInfo:
     customer_gateway_ip: str
     tunnels: tuple[VpnTunnelInfo, ...]
     name: str | None = None
+    static_routes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -247,6 +249,8 @@ class FirewallRule:
     source_cidrs: tuple[str, ...]
     dest_cidrs: tuple[str, ...]
     dest_negate: bool = False
+    source_negate: bool = False
+    dest_ports: tuple[str, ...] = ("any",)
     message: str = ""
 
 

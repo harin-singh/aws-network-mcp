@@ -54,7 +54,7 @@ python3 -m aws_network_mcp.demo
 
 ## Connect from an MCP client
 
-Set `AWS_NETWORK_MCP_DEMO=true` for the landing-zone fixtures. Omit it and provide an AWS profile to call live describe APIs.
+Set `AWS_NETWORK_MCP_DEMO=true` for the landing-zone fixtures. Omit it and provide an AWS profile: the server describes the region and builds a topology for hop-by-hop analysis.
 
 Cursor (`~/.cursor/mcp.json` or project MCP config):
 
@@ -164,7 +164,12 @@ explain_connectivity(source_ip="10.10.0.10", dest_ip="10.20.0.10", port=443)
 
 ## IAM
 
-Read-only. See `iam/policy.json`. Network Firewall describe actions are included for a future live policy loader; path analysis today uses fixture policy or skips the firewall hop when no policy is loaded.
+Read-only. `iam/policy.json` is the minimal policy for live hop-by-hop analysis:
+
+- EC2 describe of VPCs, subnets, route tables, security groups, NACLs, ENIs, Transit Gateway attachments/route tables (`SearchTransitGatewayRoutes`, associations, propagations), VPN, and managed prefix lists
+- Direct Connect virtual-interface describe
+- Network Firewall `ListFirewalls`, `DescribeFirewall`, `DescribeFirewallPolicy`, `DescribeRuleGroup`
+- Route 53 Resolver and CloudWatch Logs Insights (inventory tools, not required for path analysis)
 
 Optional `iam/policy-reachability-analyzer.json` adds Reachability Analyzer (creates/deletes paths; billed per analysis).
 
@@ -194,9 +199,9 @@ Dependencies are pinned in `pyproject.toml`. CI runs ruff, mypy, pytest (includi
 
 ## Known limitations
 
-- Live `describe_path` needs a topology object. Demo mode loads landing-zone fixtures. Connecting without `AWS_NETWORK_MCP_DEMO` uses boto3 for inventory-style tools (TGW lookup, VPN/BGP, DNS, flow logs, Reachability Analyzer) but does not yet build a full hybrid topology from the account, so hop-by-hop analysis still requires `load_demo_scenario` or a preloaded fixture.
-- Live Network Firewall policy import is not implemented. Firewall hops use the fixture policy that matches the landing-zone Suricata rules.
-- On-prem customer-gateway ACLs and on-prem firewalls are not evaluated. An on-prem hop is reported as AWS-side complete.
+- Live hop-by-hop analysis loads a regional topology at process start via `LiveTopologyLoader` (EC2 describe APIs + Network Firewall policy import). The process uses `AWS_REGION` / the boto3 session region only; other regions are not scanned.
+- Network Firewall import evaluates `STRICT_ORDER` stateful 5-tuple / Suricata headers: `pass`/`drop`/`reject`, `ip`/`tcp`/`udp`/`icmp`, CIDR/`any`/`$HOME_NET`/`!$HOME_NET`, optional dest ports, `sid`, `msg`. Unsupported and skipped: `alert`; application inspectors (`http`/`tls`/`dns`); `content`/`pcre`/`flow`/`byte_*`/`threshold`/`xbits`/`dataset`/`geoip`; domain-list rule groups (`TLS_SNI`/`HTTP_HOST`); stateless rule groups (only `StatefulDefaultActions` apply after stateful rules). Import notes are logged and returned as `topology_warnings` on `describe_path`.
+- On-prem CIDRs come from TGW routes toward VPN or Direct Connect attachments and from VPN static routes. Customer-gateway ACLs and on-prem firewalls are not evaluated.
 - Direct Connect is modeled as a TGW attachment type. There is no DX Gateway / transit VIF topology builder.
 - IPv6, PrivateLink, VPC Lattice, and cross-account RAM-shared attachments are out of scope.
 - VPC Reachability Analyzer is optional and billed by AWS (~$0.10 per path).
