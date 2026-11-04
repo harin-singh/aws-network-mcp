@@ -195,7 +195,19 @@ make demo
 make ci
 ```
 
-Dependencies are pinned in `pyproject.toml`. CI runs ruff, mypy, pytest (including an stdio `list_tools` / `call_tool` smoke test), pip-audit, gitleaks, terraform fmt, and Checkov. Checkov skips for account-wide describe APIs are listed in `.checkov.yaml`.
+Dependencies are pinned in `pyproject.toml`. CI runs ruff, mypy, pytest (including an stdio `list_tools` / `call_tool` smoke test), pip-audit, gitleaks, terraform fmt, Checkov, and `pre-commit run --all-files`. Checkov skips for account-wide describe APIs are listed in `.checkov.yaml`.
+
+## Local development
+
+Hook versions match CI (`ruff==0.17.3`, `mypy==1.19.1`, `gitleaks v8.18.4`).
+
+```bash
+python3 -m pip install -e ".[dev]"
+pre-commit install
+pre-commit run --all-files
+# or
+make pre-commit
+```
 
 ## Known limitations
 

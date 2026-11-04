@@ -1,4 +1,4 @@
-.PHONY: install dev lint typecheck test demo smoke clean all ci
+.PHONY: install dev lint typecheck test demo smoke clean all ci pre-commit
 
 PYTHON ?= python3
 
@@ -17,6 +17,9 @@ lint:
 lint-fix:
 	ruff check --fix src tests
 	ruff format src tests
+
+pre-commit:
+	pre-commit run --all-files
 
 typecheck:
 	mypy src

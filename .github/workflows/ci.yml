@@ -26,6 +26,22 @@ jobs:
       - name: Run ruff format check
         run: ruff format --check src tests
 
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pre-commit
+        run: pip install pre-commit==4.7.0
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
+
   typecheck:
     runs-on: ubuntu-latest
     steps:
