@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import boto3
 
@@ -16,10 +16,17 @@ if TYPE_CHECKING:
 class CloudWatchLogsClient:
     """Read-only CloudWatch Logs client for VPC Flow Log analysis."""
 
-    def __init__(self, region: str | None = None, session: boto3.Session | None = None):
+    def __init__(
+        self,
+        region: str | None = None,
+        session: boto3.Session | None = None,
+        client: Boto3LogsClient | None = None,
+    ):
         self._session = session or boto3.Session()
-        self._region = region or self._session.region_name
-        self._client: Boto3LogsClient = self._session.client("logs", region_name=self._region)
+        self._region = region or self._session.region_name or "us-east-1"
+        self._client: Boto3LogsClient = client or self._session.client(
+            "logs", region_name=self._region
+        )
 
     def query_flow_logs(
         self,
@@ -107,9 +114,10 @@ class CloudWatchLogsClient:
         for row in response.get("results", []):
             fields = {f["field"]: f["value"] for f in row}
 
-            action_val = fields.get("action", "ACCEPT")
-            if action_val not in ("ACCEPT", "REJECT"):
-                action_val = "ACCEPT"
+            raw_action = fields.get("action", "ACCEPT")
+            action_val: Literal["ACCEPT", "REJECT"] = (
+                "REJECT" if raw_action == "REJECT" else "ACCEPT"
+            )
 
             results.append(
                 FlowLogEntry(
@@ -119,7 +127,7 @@ class CloudWatchLogsClient:
                     src_port=int(fields.get("srcPort", 0)),
                     dst_port=int(fields.get("dstPort", 0)),
                     protocol=int(fields.get("protocol", 0)),
-                    action=action_val,  # type: ignore[arg-type]
+                    action=action_val,
                     log_status=fields.get("logStatus", ""),
                     interface_id=fields.get("interfaceId"),
                 )

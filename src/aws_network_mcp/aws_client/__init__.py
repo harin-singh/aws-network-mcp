@@ -2,10 +2,14 @@
 
 from aws_network_mcp.aws_client.ec2_client import EC2Client
 from aws_network_mcp.aws_client.logs_client import CloudWatchLogsClient
+from aws_network_mcp.aws_client.nfw_client import NetworkFirewallClient
 from aws_network_mcp.aws_client.route53_client import Route53ResolverClient
+from aws_network_mcp.aws_client.topology_loader import LiveTopologyLoader
 
 __all__ = [
     "EC2Client",
     "Route53ResolverClient",
     "CloudWatchLogsClient",
+    "NetworkFirewallClient",
+    "LiveTopologyLoader",
 ]
