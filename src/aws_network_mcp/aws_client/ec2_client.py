@@ -6,7 +6,7 @@ NACL, Transit Gateway, VPN, and Direct Connect resources.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import boto3
 
@@ -48,10 +48,17 @@ def _get_name_tag(tags: Any) -> str | None:
 class EC2Client:
     """Read-only EC2 client for network resource discovery."""
 
-    def __init__(self, region: str | None = None, session: boto3.Session | None = None):
+    def __init__(
+        self,
+        region: str | None = None,
+        session: boto3.Session | None = None,
+        client: Boto3EC2Client | None = None,
+    ):
         self._session = session or boto3.Session()
-        self._region = region or self._session.region_name
-        self._client: Boto3EC2Client = self._session.client("ec2", region_name=self._region)
+        self._region = region or self._session.region_name or "us-east-1"
+        self._client: Boto3EC2Client = client or self._session.client(
+            "ec2", region_name=self._region
+        )
 
     def get_instance_network_info(self, instance_id: str) -> NetworkEndpoint | None:
         """Get network endpoint info for an EC2 instance."""
@@ -228,7 +235,9 @@ class EC2Client:
             rules=tuple(rules),
         )
 
-    def _parse_sg_rules(self, rule: Any, direction: str) -> list[SecurityGroupRule]:
+    def _parse_sg_rules(
+        self, rule: Any, direction: Literal["ingress", "egress"]
+    ) -> list[SecurityGroupRule]:
         """Parse security group permission into rule objects."""
         results: list[SecurityGroupRule] = []
         protocol = str(rule.get("IpProtocol", "-1"))
@@ -238,7 +247,7 @@ class EC2Client:
         for ip_range in rule.get("IpRanges", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -250,7 +259,7 @@ class EC2Client:
         for ip_range in rule.get("Ipv6Ranges", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -262,7 +271,7 @@ class EC2Client:
         for sg_ref in rule.get("UserIdGroupPairs", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -274,7 +283,7 @@ class EC2Client:
         for pl in rule.get("PrefixListIds", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -286,7 +295,7 @@ class EC2Client:
         if not results:
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -314,13 +323,15 @@ class EC2Client:
         rules: list[NaclRule] = []
 
         for entry in nacl.get("Entries", []):
-            direction = "ingress" if not entry.get("Egress") else "egress"
+            direction: Literal["ingress", "egress"] = (
+                "ingress" if not entry.get("Egress") else "egress"
+            )
             protocol = str(entry.get("Protocol", "-1"))
             port_range = entry.get("PortRange", {})
             rules.append(
                 NaclRule(
                     rule_number=entry.get("RuleNumber", 0),
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=port_range.get("From"),
                     to_port=port_range.get("To"),
@@ -366,7 +377,13 @@ class EC2Client:
                 TgwAttachment(
                     attachment_id=att.get("TransitGatewayAttachmentId", ""),
                     tgw_id=att.get("TransitGatewayId", ""),
-                    attachment_type=att.get("ResourceType", "vpc"),  # type: ignore[arg-type]
+                    attachment_type=cast(
+                        Literal["vpc", "vpn", "direct-connect-gateway", "peering", "connect"],
+                        att.get("ResourceType", "vpc")
+                        if att.get("ResourceType")
+                        in {"vpc", "vpn", "direct-connect-gateway", "peering", "connect"}
+                        else "vpc",
+                    ),
                     state=att.get("State", ""),
                     resource_id=att.get("ResourceId", ""),
                     resource_owner_id=att.get("ResourceOwnerId", ""),

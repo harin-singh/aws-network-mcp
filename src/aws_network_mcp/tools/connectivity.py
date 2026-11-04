@@ -22,19 +22,19 @@ def _endpoint_from_input(
     eni_id: str | None = None,
     ip: str | None = None,
     vpc_id: str | None = None,
+    topology: NetworkTopology | None = None,
 ) -> NetworkEndpoint | None:
     """Resolve input parameters to a NetworkEndpoint."""
-    if ec2_client is None:
-        if ip:
-            return NetworkEndpoint(ip=ip, vpc_id=vpc_id, is_on_prem=vpc_id is None)
-        return None
-
-    if instance_id:
+    if instance_id and ec2_client:
         return ec2_client.get_instance_network_info(instance_id)
-    if eni_id:
+    if eni_id and ec2_client:
         return ec2_client.get_eni_network_info(eni_id)
-    if ip:
+    if ip and ec2_client:
         return ec2_client.get_ip_network_info(ip, vpc_id)
+    if ip and topology:
+        return topology.resolve_endpoint(ip)
+    if ip:
+        return NetworkEndpoint(ip=ip, vpc_id=vpc_id, is_on_prem=vpc_id is None)
     return None
 
 
@@ -73,6 +73,8 @@ def _format_result(result: PathAnalysisResult) -> dict[str, Any]:
         "summary": result.summary,
         "hops": [_format_hop(hop) for hop in result.hops],
         "blocking_hop": _format_hop(result.blocking_hop) if result.blocking_hop else None,
+        "additional_findings": result.additional_findings,
+        "inspection_bypassed": result.inspection_bypassed,
     }
 
 
@@ -118,6 +120,7 @@ def describe_path(
         instance_id=source_instance_id,
         eni_id=source_eni_id,
         ip=source_ip,
+        topology=topology,
     )
     if not source:
         return {
@@ -131,6 +134,7 @@ def describe_path(
         eni_id=dest_eni_id,
         ip=dest_ip,
         vpc_id=dest_vpc_id,
+        topology=topology,
     )
     if not dest:
         return {
@@ -197,6 +201,18 @@ def explain_connectivity(
         icon = "✓" if hop["verdict"] == "ALLOW" else "✗" if hop["verdict"] == "DENY" else "?"
         explanation_parts.append(
             f"  {i}. [{icon}] {hop['hop_type']}: {hop['resource_id']} - {hop['details']}"
+        )
+
+    if result.get("additional_findings"):
+        explanation_parts.append("")
+        explanation_parts.append("Additional findings:")
+        for finding in result["additional_findings"]:
+            explanation_parts.append(f"  - {finding}")
+
+    if result.get("inspection_bypassed"):
+        explanation_parts.append("")
+        explanation_parts.append(
+            "**Inspection bypassed** — a more-specific TGW route skipped the firewall."
         )
 
     if result["blocking_hop"]:

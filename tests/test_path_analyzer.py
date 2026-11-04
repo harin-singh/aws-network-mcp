@@ -181,16 +181,94 @@ class TestPathAnalyzerScenarios:
         assert analysis.blocking_hop is not None
         assert "nacl" in analysis.blocking_hop.hop_type.lower()
 
-    def test_all_scenarios_detect_issues(self) -> None:
-        """Test that all demo scenarios are correctly identified as broken."""
+    def test_scenario_prod_nonprod_blocked(self) -> None:
+        """Prod to nonprod is a TGW blackhole plus a firewall default-drop finding."""
+        from aws_network_mcp.fixtures.scenarios import get_scenario
+
+        loaded = get_scenario("prod_nonprod_blocked")
+        assert loaded is not None
+        scenario, topology = loaded
+        analysis = PathAnalyzer(topology).analyze_path(
+            scenario.source, scenario.destination, scenario.port, scenario.protocol
+        )
+        assert analysis.overall_verdict == Verdict.BLACKHOLE
+        assert analysis.blocking_hop is not None
+        assert analysis.blocking_hop.hop_type == "transit_gateway"
+        assert analysis.blocking_hop.blocking_rule is not None
+        assert "blackhole" in analysis.blocking_hop.blocking_rule
+        assert analysis.blocking_hop.matched_route is not None
+        assert "10.20.0.0/24" in analysis.blocking_hop.matched_route
+        assert any("sid:1000001" in finding for finding in analysis.additional_findings)
+
+    def test_scenario_nonprod_onprem_blocked(self) -> None:
+        """Nonprod to on-prem is blackholed before inspection."""
+        from aws_network_mcp.fixtures.scenarios import get_scenario
+
+        loaded = get_scenario("nonprod_onprem_blocked")
+        assert loaded is not None
+        scenario, topology = loaded
+        analysis = PathAnalyzer(topology).analyze_path(
+            scenario.source, scenario.destination, scenario.port, scenario.protocol
+        )
+        assert analysis.overall_verdict == Verdict.BLACKHOLE
+        assert any("sid:1000003" in finding for finding in analysis.additional_findings)
+
+    def test_scenario_spoke_onprem_via_inspection(self) -> None:
+        """Prod to on-prem is allowed through inspection and a BGP-learned VPN route."""
+        from aws_network_mcp.fixtures.scenarios import get_scenario
+
+        loaded = get_scenario("spoke_onprem_via_inspection")
+        assert loaded is not None
+        scenario, topology = loaded
+        analysis = PathAnalyzer(topology).analyze_path(
+            scenario.source, scenario.destination, scenario.port, scenario.protocol
+        )
+        assert analysis.overall_verdict == Verdict.ALLOW
+        hop_types = [h.hop_type for h in analysis.hops]
+        assert "network_firewall" in hop_types
+        assert "on_prem" in hop_types
+        fw = next(h for h in analysis.hops if h.hop_type == "network_firewall")
+        assert fw.matched_route == "sid:2000005 pass"
+        insp = [h for h in analysis.hops if h.hop_type == "transit_gateway"]
+        assert any(
+            h.matched_route
+            and "propagated" in h.matched_route
+            and "10.200.0.0/16" in h.matched_route
+            for h in insp
+        )
+        assert not analysis.inspection_bypassed
+
+    def test_scenario_inspection_bypass(self) -> None:
+        """A propagated spoke prefix on another RT skips the firewall."""
+        from aws_network_mcp.fixtures.scenarios import get_scenario
+
+        loaded = get_scenario("inspection_bypass_propagation")
+        assert loaded is not None
+        scenario, topology = loaded
+        analysis = PathAnalyzer(topology).analyze_path(
+            scenario.source, scenario.destination, scenario.port, scenario.protocol
+        )
+        assert analysis.overall_verdict == Verdict.ALLOW
+        assert analysis.inspection_bypassed
+        bypass = next(h for h in analysis.hops if h.hop_type == "inspection_bypass")
+        assert bypass.matched_route is not None
+        assert "10.20.0.0/24" in bypass.matched_route
+        assert "propagated" in bypass.matched_route
+        assert not any(h.hop_type == "network_firewall" for h in analysis.hops)
+
+    def test_all_scenarios_match_expected_verdict(self) -> None:
+        """Every demo scenario matches its declared expected verdict."""
         from aws_network_mcp.fixtures.scenarios import DEMO_SCENARIOS
 
         for scenario_name, (scenario, topology) in DEMO_SCENARIOS.items():
-            analyzer = PathAnalyzer(topology)
-            analysis = analyzer.analyze_path(
+            analysis = PathAnalyzer(topology).analyze_path(
                 scenario.source, scenario.destination, scenario.port, scenario.protocol
             )
-
-            assert analysis.overall_verdict != Verdict.ALLOW, (
-                f"Scenario {scenario_name} should not be ALLOW"
+            assert analysis.overall_verdict == scenario.expected_verdict, (
+                f"{scenario_name}: expected {scenario.expected_verdict}, "
+                f"got {analysis.overall_verdict}: {analysis.summary}"
             )
+            assert analysis.inspection_bypassed == scenario.expect_inspection_bypass
+            if scenario.expected_blocking_hop_type:
+                assert analysis.blocking_hop is not None
+                assert analysis.blocking_hop.hop_type == scenario.expected_blocking_hop_type
