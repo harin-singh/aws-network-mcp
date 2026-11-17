@@ -16,6 +16,7 @@ from aws_network_mcp.models import (
     SecurityGroupInfo,
     SecurityGroupRule,
     Verdict,
+    format_port_range,
 )
 
 EPHEMERAL_PORT_START = 1024
@@ -118,7 +119,7 @@ class SecurityGroupEvaluator:
                 return (
                     Verdict.ALLOW,
                     f"Allowed by SG {sg.sg_id} ingress rule: "
-                    f"source={source_desc}, port={rule.from_port}-{rule.to_port}, "
+                    f"source={source_desc}, port={format_port_range(rule.from_port, rule.to_port)}, "
                     f"protocol={rule.protocol} ({desc})",
                     rule,
                 )
@@ -160,7 +161,7 @@ class SecurityGroupEvaluator:
                 return (
                     Verdict.ALLOW,
                     f"Allowed by SG {sg.sg_id} egress rule: "
-                    f"destination={dest_desc}, port={rule.from_port}-{rule.to_port}, "
+                    f"destination={dest_desc}, port={format_port_range(rule.from_port, rule.to_port)}, "
                     f"protocol={rule.protocol} ({desc})",
                     rule,
                 )
@@ -239,14 +240,14 @@ class NaclEvaluator:
                 return (
                     Verdict.ALLOW,
                     f"Allowed by NACL {nacl.nacl_id} rule #{rule.rule_number} "
-                    f"({direction}): {rule.cidr} port {rule.from_port}-{rule.to_port}",
+                    f"({direction}): {rule.cidr} port {format_port_range(rule.from_port, rule.to_port)}",
                     rule,
                 )
             else:
                 return (
                     Verdict.DENY,
                     f"Denied by NACL {nacl.nacl_id} rule #{rule.rule_number} "
-                    f"({direction}): {rule.cidr} port {rule.from_port}-{rule.to_port}",
+                    f"({direction}): {rule.cidr} port {format_port_range(rule.from_port, rule.to_port)}",
                     rule,
                 )
 

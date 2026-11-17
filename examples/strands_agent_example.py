@@ -51,9 +51,9 @@ def run_with_strands() -> None:
 
     agent = Agent(
         model=model,
-        system_prompt="""You are a network troubleshooting assistant with deep expertise 
-in AWS networking including VPCs, Transit Gateway, security groups, NACLs, 
-VPN, and Direct Connect. 
+        system_prompt="""You are a network troubleshooting assistant with deep expertise
+in AWS networking including VPCs, Transit Gateway, security groups, NACLs,
+VPN, and Direct Connect.
 
 When asked "Why can't A talk to B?", use the available tools to:
 1. First use describe_path or explain_connectivity to analyze the network path
@@ -95,11 +95,14 @@ def demo_without_strands() -> None:
     print("Running MCP server in demo mode...")
     print("This shows what tools are available:\n")
 
-    result = subprocess.run(
+    completed = subprocess.run(
         [sys.executable, "-m", "aws_network_mcp.demo"],
         capture_output=False,
         text=True,
+        check=False,
     )
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
 
 
 if __name__ == "__main__":

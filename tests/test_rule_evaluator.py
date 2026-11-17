@@ -69,8 +69,10 @@ class TestSecurityGroupEvaluator:
             rules=(SecurityGroupRule("ingress", "-1", None, None, "0.0.0.0/0"),),
         )
 
-        verdict, _, _ = evaluator.evaluate_ingress(sg, "1.2.3.4", 22, Protocol.TCP)
+        verdict, details, _ = evaluator.evaluate_ingress(sg, "1.2.3.4", 22, Protocol.TCP)
         assert verdict == Verdict.ALLOW
+        assert "None-None" not in details
+        assert "port=all" in details
 
     def test_evaluate_ingress_sg_reference(self) -> None:
         """Test ingress allowed by security group reference."""

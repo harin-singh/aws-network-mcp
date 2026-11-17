@@ -1,10 +1,14 @@
-"""Demo topology fixtures for offline mode.
+"""Demo topology matching aws-hybrid-network-landing-zone.
 
-Represents a realistic hub-and-spoke architecture:
-- 3 spoke VPCs (prod, dev, shared-services)
-- 1 inspection VPC with Network Firewall
-- Transit Gateway with segmented route tables
-- Site-to-Site VPN to simulated on-prem (10.200.0.0/16)
+CIDRs and TGW segmentation follow examples/complete in
+https://github.com/harin-singh/aws-hybrid-network-landing-zone
+
+- Inspection VPC 10.0.0.0/24
+- Shared Services 10.1.0.0/24
+- Prod 10.10.0.0/24
+- Nonprod 10.20.0.0/24
+- On-prem advertised via BGP 10.200.0.0/16
+- Simulated on-prem VPC 192.168.100.0/24
 """
 
 from __future__ import annotations
@@ -15,61 +19,107 @@ from typing import Any
 
 from aws_network_mcp.analysis.path_analyzer import NetworkTopology
 from aws_network_mcp.models import (
+    FirewallPolicy,
+    FirewallRule,
     NaclInfo,
     NaclRule,
+    NetworkEndpoint,
     RouteEntry,
     RouteTableInfo,
     SecurityGroupInfo,
     SecurityGroupRule,
+    TgwAttachment,
     TgwRouteEntry,
     TgwRouteTableInfo,
 )
 
 
 class DemoTopology:
-    """Demo topology builder for offline testing."""
+    """Landing-zone topology builder for offline testing."""
 
+    VPC_INSPECTION = "vpc-inspection-001"
+    VPC_SHARED = "vpc-shared-001"
     VPC_PROD = "vpc-prod-001"
-    VPC_DEV = "vpc-dev-002"
-    VPC_SHARED = "vpc-shared-003"
-    VPC_INSPECTION = "vpc-inspection-004"
-    ON_PREM_CIDR = "10.200.0.0/16"
+    VPC_NONPROD = "vpc-nonprod-001"
+
+    CIDR_INSPECTION = "10.0.0.0/24"
+    CIDR_SHARED = "10.1.0.0/24"
+    CIDR_PROD = "10.10.0.0/24"
+    CIDR_NONPROD = "10.20.0.0/24"
+    CIDR_ONPREM = "10.200.0.0/16"
+    CIDR_ONPREM_VPC = "192.168.100.0/24"
 
     SUBNET_PROD_APP = "subnet-prod-app-001"
     SUBNET_PROD_DB = "subnet-prod-db-002"
-    SUBNET_DEV_APP = "subnet-dev-app-003"
-    SUBNET_SHARED_DNS = "subnet-shared-dns-004"
-    SUBNET_INSPECTION = "subnet-inspection-005"
+    SUBNET_NONPROD_APP = "subnet-nonprod-app-001"
+    SUBNET_SHARED_DNS = "subnet-shared-dns-001"
+    SUBNET_INSPECTION = "subnet-inspection-001"
 
     TGW_ID = "tgw-demo-001"
     TGW_ATT_PROD = "tgw-attach-prod-001"
-    TGW_ATT_DEV = "tgw-attach-dev-002"
+    TGW_ATT_NONPROD = "tgw-attach-nonprod-002"
     TGW_ATT_SHARED = "tgw-attach-shared-003"
     TGW_ATT_INSPECTION = "tgw-attach-inspection-004"
     TGW_ATT_VPN = "tgw-attach-vpn-005"
 
     TGW_RT_PROD = "tgw-rtb-prod-001"
-    TGW_RT_DEV = "tgw-rtb-dev-002"
+    TGW_RT_NONPROD = "tgw-rtb-nonprod-002"
     TGW_RT_SHARED = "tgw-rtb-shared-003"
     TGW_RT_INSPECTION = "tgw-rtb-inspection-004"
+    TGW_RT_ONPREM = "tgw-rtb-onprem-005"
 
     ENI_PROD_APP = "eni-prod-app-001"
     ENI_PROD_DB = "eni-prod-db-002"
-    ENI_DEV_APP = "eni-dev-app-003"
-    ENI_SHARED_DNS = "eni-shared-dns-004"
+    ENI_NONPROD_APP = "eni-nonprod-app-001"
+    ENI_SHARED_DNS = "eni-shared-dns-001"
+
+    IP_PROD_APP = "10.10.0.10"
+    IP_PROD_DB = "10.10.0.20"
+    IP_NONPROD_APP = "10.20.0.10"
+    IP_SHARED_DNS = "10.1.0.10"
+    IP_ONPREM = "10.200.1.50"
 
     SG_PROD_APP = "sg-prod-app-001"
     SG_PROD_DB = "sg-prod-db-002"
-    SG_DEV_APP = "sg-dev-app-001"
+    SG_NONPROD_APP = "sg-nonprod-app-001"
     SG_SHARED_DNS = "sg-shared-dns-001"
 
     NACL_PROD = "acl-prod-001"
-    NACL_DEV = "acl-dev-001"
+    NACL_NONPROD = "acl-nonprod-001"
     NACL_SHARED = "acl-shared-001"
+
+    FW_POLICY_ID = "nfw-policy-inspection-001"
 
     @classmethod
     def build_healthy_topology(cls) -> NetworkTopology:
-        """Build a fully healthy topology with no connectivity issues."""
+        """Build the landing-zone topology with segmentation intact."""
+        known = {
+            cls.IP_PROD_APP: NetworkEndpoint(
+                ip=cls.IP_PROD_APP,
+                vpc_id=cls.VPC_PROD,
+                subnet_id=cls.SUBNET_PROD_APP,
+                eni_id=cls.ENI_PROD_APP,
+            ),
+            cls.IP_PROD_DB: NetworkEndpoint(
+                ip=cls.IP_PROD_DB,
+                vpc_id=cls.VPC_PROD,
+                subnet_id=cls.SUBNET_PROD_DB,
+                eni_id=cls.ENI_PROD_DB,
+            ),
+            cls.IP_NONPROD_APP: NetworkEndpoint(
+                ip=cls.IP_NONPROD_APP,
+                vpc_id=cls.VPC_NONPROD,
+                subnet_id=cls.SUBNET_NONPROD_APP,
+                eni_id=cls.ENI_NONPROD_APP,
+            ),
+            cls.IP_SHARED_DNS: NetworkEndpoint(
+                ip=cls.IP_SHARED_DNS,
+                vpc_id=cls.VPC_SHARED,
+                subnet_id=cls.SUBNET_SHARED_DNS,
+                eni_id=cls.ENI_SHARED_DNS,
+            ),
+            cls.IP_ONPREM: NetworkEndpoint(ip=cls.IP_ONPREM, is_on_prem=True),
+        }
         return NetworkTopology(
             route_tables=cls._build_route_tables(),
             security_groups=cls._build_security_groups(),
@@ -82,6 +132,180 @@ class DemoTopology:
             tgw_attachment_to_route_table=cls._build_tgw_attachment_rt_mapping(),
             vpc_to_tgw_attachment=cls._build_vpc_tgw_attachment_mapping(),
             prefix_list_cidrs={},
+            attachments=cls._build_attachments(),
+            inspection_attachment_ids=frozenset({cls.TGW_ATT_INSPECTION}),
+            firewall_policies={cls.FW_POLICY_ID: cls._build_firewall_policy()},
+            inspection_vpc_id=cls.VPC_INSPECTION,
+            vpn_attachment_id=cls.TGW_ATT_VPN,
+            known_endpoints=known,
+            on_prem_cidrs=(cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+        )
+
+    @classmethod
+    def _build_attachments(cls) -> dict[str, TgwAttachment]:
+        return {
+            cls.TGW_ATT_PROD: TgwAttachment(
+                cls.TGW_ATT_PROD,
+                cls.TGW_ID,
+                "vpc",
+                "available",
+                cls.VPC_PROD,
+                "111111111111",
+                "prod",
+            ),
+            cls.TGW_ATT_NONPROD: TgwAttachment(
+                cls.TGW_ATT_NONPROD,
+                cls.TGW_ID,
+                "vpc",
+                "available",
+                cls.VPC_NONPROD,
+                "111111111111",
+                "nonprod",
+            ),
+            cls.TGW_ATT_SHARED: TgwAttachment(
+                cls.TGW_ATT_SHARED,
+                cls.TGW_ID,
+                "vpc",
+                "available",
+                cls.VPC_SHARED,
+                "111111111111",
+                "shared",
+            ),
+            cls.TGW_ATT_INSPECTION: TgwAttachment(
+                cls.TGW_ATT_INSPECTION,
+                cls.TGW_ID,
+                "vpc",
+                "available",
+                cls.VPC_INSPECTION,
+                "111111111111",
+                "inspection",
+            ),
+            cls.TGW_ATT_VPN: TgwAttachment(
+                cls.TGW_ATT_VPN,
+                cls.TGW_ID,
+                "vpn",
+                "available",
+                "vpn-demo-001",
+                "111111111111",
+                "onprem-vpn",
+            ),
+        }
+
+    @classmethod
+    def _build_firewall_policy(cls) -> FirewallPolicy:
+        home_net = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+        return FirewallPolicy(
+            policy_id=cls.FW_POLICY_ID,
+            name="hybrid-network-inspection-policy",
+            rule_order="STRICT_ORDER",
+            default_action="aws:drop_established",
+            rules=(
+                FirewallRule(
+                    "1000001",
+                    "drop",
+                    "ip",
+                    (cls.CIDR_PROD,),
+                    (cls.CIDR_NONPROD,),
+                    message="Deny prod to nonprod",
+                ),
+                FirewallRule(
+                    "1000002",
+                    "drop",
+                    "ip",
+                    (cls.CIDR_NONPROD,),
+                    (cls.CIDR_PROD,),
+                    message="Deny nonprod to prod",
+                ),
+                FirewallRule(
+                    "1000003",
+                    "drop",
+                    "ip",
+                    (cls.CIDR_NONPROD,),
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    message="Deny nonprod to onprem",
+                ),
+                FirewallRule(
+                    "1000004",
+                    "drop",
+                    "ip",
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    (cls.CIDR_NONPROD,),
+                    message="Deny onprem to nonprod",
+                ),
+                FirewallRule(
+                    "2000001",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_PROD,),
+                    (cls.CIDR_SHARED,),
+                    message="Allow prod to shared",
+                ),
+                FirewallRule(
+                    "2000002",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_SHARED,),
+                    (cls.CIDR_PROD,),
+                    message="Allow shared to prod",
+                ),
+                FirewallRule(
+                    "2000003",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_NONPROD,),
+                    (cls.CIDR_SHARED,),
+                    message="Allow nonprod to shared",
+                ),
+                FirewallRule(
+                    "2000004",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_SHARED,),
+                    (cls.CIDR_NONPROD,),
+                    message="Allow shared to nonprod",
+                ),
+                FirewallRule(
+                    "2000005",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_PROD,),
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    message="Allow prod to onprem",
+                ),
+                FirewallRule(
+                    "2000006",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    (cls.CIDR_PROD,),
+                    message="Allow onprem to prod",
+                ),
+                FirewallRule(
+                    "2000007",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_SHARED,),
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    message="Allow shared to onprem",
+                ),
+                FirewallRule(
+                    "2000008",
+                    "pass",
+                    "ip",
+                    (cls.CIDR_ONPREM, cls.CIDR_ONPREM_VPC),
+                    (cls.CIDR_SHARED,),
+                    message="Allow onprem to shared",
+                ),
+                FirewallRule(
+                    "3000001",
+                    "pass",
+                    "ip",
+                    home_net,
+                    home_net,
+                    dest_negate=True,
+                    message="Allow inspected egress to internet",
+                ),
+            ),
         )
 
     @classmethod
@@ -92,30 +316,28 @@ class DemoTopology:
                 vpc_id=cls.VPC_PROD,
                 name="prod-private-rt",
                 routes=(
-                    RouteEntry("10.1.0.0/16", "local", "local", "active"),
-                    RouteEntry("10.0.0.0/8", "transit-gateway", cls.TGW_ID, "active"),
+                    RouteEntry(cls.CIDR_PROD, "local", "local", "active"),
                     RouteEntry("0.0.0.0/0", "transit-gateway", cls.TGW_ID, "active"),
                 ),
                 subnet_associations=(cls.SUBNET_PROD_APP, cls.SUBNET_PROD_DB),
             ),
-            "rtb-dev-001": RouteTableInfo(
-                route_table_id="rtb-dev-001",
-                vpc_id=cls.VPC_DEV,
-                name="dev-private-rt",
+            "rtb-nonprod-001": RouteTableInfo(
+                route_table_id="rtb-nonprod-001",
+                vpc_id=cls.VPC_NONPROD,
+                name="nonprod-private-rt",
                 routes=(
-                    RouteEntry("10.2.0.0/16", "local", "local", "active"),
-                    RouteEntry("10.0.0.0/8", "transit-gateway", cls.TGW_ID, "active"),
+                    RouteEntry(cls.CIDR_NONPROD, "local", "local", "active"),
                     RouteEntry("0.0.0.0/0", "transit-gateway", cls.TGW_ID, "active"),
                 ),
-                subnet_associations=(cls.SUBNET_DEV_APP,),
+                subnet_associations=(cls.SUBNET_NONPROD_APP,),
             ),
             "rtb-shared-001": RouteTableInfo(
                 route_table_id="rtb-shared-001",
                 vpc_id=cls.VPC_SHARED,
                 name="shared-private-rt",
                 routes=(
-                    RouteEntry("10.3.0.0/16", "local", "local", "active"),
-                    RouteEntry("10.0.0.0/8", "transit-gateway", cls.TGW_ID, "active"),
+                    RouteEntry(cls.CIDR_SHARED, "local", "local", "active"),
+                    RouteEntry("0.0.0.0/0", "transit-gateway", cls.TGW_ID, "active"),
                 ),
                 subnet_associations=(cls.SUBNET_SHARED_DNS,),
             ),
@@ -124,36 +346,49 @@ class DemoTopology:
                 vpc_id=cls.VPC_INSPECTION,
                 name="inspection-rt",
                 routes=(
-                    RouteEntry("10.4.0.0/16", "local", "local", "active"),
+                    RouteEntry(cls.CIDR_INSPECTION, "local", "local", "active"),
                     RouteEntry("10.0.0.0/8", "transit-gateway", cls.TGW_ID, "active"),
+                    RouteEntry("172.16.0.0/12", "transit-gateway", cls.TGW_ID, "active"),
+                    RouteEntry("192.168.0.0/16", "transit-gateway", cls.TGW_ID, "active"),
                 ),
                 subnet_associations=(cls.SUBNET_INSPECTION,),
             ),
         }
 
     @classmethod
+    def _allow_all_egress(cls) -> SecurityGroupRule:
+        return SecurityGroupRule(
+            "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
+        )
+
+    @classmethod
     def _build_security_groups(cls) -> dict[str, SecurityGroupInfo]:
+        rfc1918_ingress = (
+            SecurityGroupRule(
+                "ingress", "1", -1, -1, "10.0.0.0/8", description="ICMP from RFC1918"
+            ),
+            SecurityGroupRule(
+                "ingress", "1", -1, -1, "172.16.0.0/12", description="ICMP from RFC1918"
+            ),
+            SecurityGroupRule(
+                "ingress", "1", -1, -1, "192.168.0.0/16", description="ICMP from RFC1918"
+            ),
+            SecurityGroupRule(
+                "ingress", "6", 443, 443, "10.0.0.0/8", description="HTTPS from RFC1918"
+            ),
+            SecurityGroupRule(
+                "ingress", "6", 443, 443, "172.16.0.0/12", description="HTTPS from RFC1918"
+            ),
+            SecurityGroupRule(
+                "ingress", "6", 443, 443, "192.168.0.0/16", description="HTTPS from RFC1918"
+            ),
+        )
         return {
             cls.SG_PROD_APP: SecurityGroupInfo(
                 sg_id=cls.SG_PROD_APP,
                 name="prod-app-sg",
                 vpc_id=cls.VPC_PROD,
-                rules=(
-                    SecurityGroupRule(
-                        "ingress", "6", 443, 443, "10.0.0.0/8", description="HTTPS from internal"
-                    ),
-                    SecurityGroupRule(
-                        "ingress",
-                        "6",
-                        22,
-                        22,
-                        "10.3.0.0/16",
-                        description="SSH from shared-services",
-                    ),
-                    SecurityGroupRule(
-                        "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
-                    ),
-                ),
+                rules=(*rfc1918_ingress, cls._allow_all_egress()),
             ),
             cls.SG_PROD_DB: SecurityGroupInfo(
                 sg_id=cls.SG_PROD_DB,
@@ -168,162 +403,101 @@ class DemoTopology:
                         source_sg_id=cls.SG_PROD_APP,
                         description="PostgreSQL from app",
                     ),
-                    SecurityGroupRule(
-                        "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
-                    ),
+                    cls._allow_all_egress(),
                 ),
             ),
-            cls.SG_DEV_APP: SecurityGroupInfo(
-                sg_id=cls.SG_DEV_APP,
-                name="dev-app-sg",
-                vpc_id=cls.VPC_DEV,
-                rules=(
-                    SecurityGroupRule(
-                        "ingress", "6", 443, 443, "10.0.0.0/8", description="HTTPS from internal"
-                    ),
-                    SecurityGroupRule(
-                        "ingress", "6", 22, 22, "10.0.0.0/8", description="SSH from internal"
-                    ),
-                    SecurityGroupRule(
-                        "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
-                    ),
-                ),
+            cls.SG_NONPROD_APP: SecurityGroupInfo(
+                sg_id=cls.SG_NONPROD_APP,
+                name="nonprod-app-sg",
+                vpc_id=cls.VPC_NONPROD,
+                rules=(*rfc1918_ingress, cls._allow_all_egress()),
             ),
             cls.SG_SHARED_DNS: SecurityGroupInfo(
                 sg_id=cls.SG_SHARED_DNS,
                 name="shared-dns-sg",
                 vpc_id=cls.VPC_SHARED,
                 rules=(
-                    SecurityGroupRule(
-                        "ingress", "17", 53, 53, "10.0.0.0/8", description="DNS UDP from internal"
-                    ),
-                    SecurityGroupRule(
-                        "ingress", "6", 53, 53, "10.0.0.0/8", description="DNS TCP from internal"
-                    ),
-                    SecurityGroupRule(
-                        "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
-                    ),
+                    SecurityGroupRule("ingress", "17", 53, 53, "10.0.0.0/8", description="DNS UDP"),
+                    SecurityGroupRule("ingress", "6", 53, 53, "10.0.0.0/8", description="DNS TCP"),
+                    SecurityGroupRule("ingress", "6", 443, 443, "10.0.0.0/8", description="HTTPS"),
+                    cls._allow_all_egress(),
                 ),
             ),
         }
 
     @classmethod
+    def _permissive_nacl(
+        cls, nacl_id: str, vpc_id: str, name: str, subnets: tuple[str, ...]
+    ) -> NaclInfo:
+        return NaclInfo(
+            nacl_id=nacl_id,
+            vpc_id=vpc_id,
+            name=name,
+            rules=(
+                NaclRule(100, "ingress", "-1", None, None, "10.0.0.0/8", "allow"),
+                NaclRule(110, "ingress", "-1", None, None, "172.16.0.0/12", "allow"),
+                NaclRule(120, "ingress", "-1", None, None, "192.168.0.0/16", "allow"),
+                NaclRule(200, "ingress", "6", 1024, 65535, "0.0.0.0/0", "allow"),
+                NaclRule(32767, "ingress", "-1", None, None, "0.0.0.0/0", "deny"),
+                NaclRule(100, "egress", "-1", None, None, "0.0.0.0/0", "allow"),
+                NaclRule(32767, "egress", "-1", None, None, "0.0.0.0/0", "deny"),
+            ),
+            subnet_associations=subnets,
+        )
+
+    @classmethod
     def _build_nacls(cls) -> dict[str, NaclInfo]:
         return {
-            cls.NACL_PROD: NaclInfo(
-                nacl_id=cls.NACL_PROD,
-                vpc_id=cls.VPC_PROD,
-                name="prod-nacl",
-                rules=(
-                    NaclRule(100, "ingress", "-1", None, None, "10.0.0.0/8", "allow"),
-                    NaclRule(200, "ingress", "6", 1024, 65535, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "ingress", "-1", None, None, "0.0.0.0/0", "deny"),
-                    NaclRule(100, "egress", "-1", None, None, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "egress", "-1", None, None, "0.0.0.0/0", "deny"),
-                ),
-                subnet_associations=(cls.SUBNET_PROD_APP, cls.SUBNET_PROD_DB),
+            cls.NACL_PROD: cls._permissive_nacl(
+                cls.NACL_PROD, cls.VPC_PROD, "prod-nacl", (cls.SUBNET_PROD_APP, cls.SUBNET_PROD_DB)
             ),
-            cls.NACL_DEV: NaclInfo(
-                nacl_id=cls.NACL_DEV,
-                vpc_id=cls.VPC_DEV,
-                name="dev-nacl",
-                rules=(
-                    NaclRule(100, "ingress", "-1", None, None, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "ingress", "-1", None, None, "0.0.0.0/0", "deny"),
-                    NaclRule(100, "egress", "-1", None, None, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "egress", "-1", None, None, "0.0.0.0/0", "deny"),
-                ),
-                subnet_associations=(cls.SUBNET_DEV_APP,),
+            cls.NACL_NONPROD: cls._permissive_nacl(
+                cls.NACL_NONPROD, cls.VPC_NONPROD, "nonprod-nacl", (cls.SUBNET_NONPROD_APP,)
             ),
-            cls.NACL_SHARED: NaclInfo(
-                nacl_id=cls.NACL_SHARED,
-                vpc_id=cls.VPC_SHARED,
-                name="shared-nacl",
-                rules=(
-                    NaclRule(100, "ingress", "-1", None, None, "10.0.0.0/8", "allow"),
-                    NaclRule(200, "ingress", "6", 1024, 65535, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "ingress", "-1", None, None, "0.0.0.0/0", "deny"),
-                    NaclRule(100, "egress", "-1", None, None, "0.0.0.0/0", "allow"),
-                    NaclRule(32767, "egress", "-1", None, None, "0.0.0.0/0", "deny"),
-                ),
-                subnet_associations=(cls.SUBNET_SHARED_DNS,),
+            cls.NACL_SHARED: cls._permissive_nacl(
+                cls.NACL_SHARED, cls.VPC_SHARED, "shared-nacl", (cls.SUBNET_SHARED_DNS,)
             ),
         }
 
     @classmethod
     def _build_tgw_route_tables(cls) -> dict[str, TgwRouteTableInfo]:
+        insp = cls.TGW_ATT_INSPECTION
         return {
             cls.TGW_RT_PROD: TgwRouteTableInfo(
                 tgw_rt_id=cls.TGW_RT_PROD,
                 tgw_id=cls.TGW_ID,
                 name="prod-tgw-rt",
                 routes=(
+                    TgwRouteEntry(cls.CIDR_NONPROD, None, None, None, "blackhole", "static"),
                     TgwRouteEntry(
-                        "10.1.0.0/16", cls.TGW_ATT_PROD, "vpc", cls.VPC_PROD, "active", "propagated"
+                        cls.CIDR_SHARED, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
                     TgwRouteEntry(
-                        "10.3.0.0/16",
-                        cls.TGW_ATT_SHARED,
-                        "vpc",
-                        cls.VPC_SHARED,
-                        "active",
-                        "propagated",
+                        cls.CIDR_ONPREM, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
                     TgwRouteEntry(
-                        "10.200.0.0/16",
-                        cls.TGW_ATT_VPN,
-                        "vpn",
-                        "vpn-demo-001",
-                        "active",
-                        "propagated",
+                        cls.CIDR_ONPREM_VPC, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
-                    TgwRouteEntry(
-                        "0.0.0.0/0",
-                        cls.TGW_ATT_INSPECTION,
-                        "vpc",
-                        cls.VPC_INSPECTION,
-                        "active",
-                        "static",
-                    ),
+                    TgwRouteEntry("0.0.0.0/0", insp, "vpc", cls.VPC_INSPECTION, "active", "static"),
                 ),
                 associations=(cls.TGW_ATT_PROD,),
-                propagations=(cls.TGW_ATT_PROD, cls.TGW_ATT_SHARED, cls.TGW_ATT_VPN),
+                propagations=(),
             ),
-            cls.TGW_RT_DEV: TgwRouteTableInfo(
-                tgw_rt_id=cls.TGW_RT_DEV,
+            cls.TGW_RT_NONPROD: TgwRouteTableInfo(
+                tgw_rt_id=cls.TGW_RT_NONPROD,
                 tgw_id=cls.TGW_ID,
-                name="dev-tgw-rt",
+                name="nonprod-tgw-rt",
                 routes=(
+                    TgwRouteEntry(cls.CIDR_PROD, None, None, None, "blackhole", "static"),
+                    TgwRouteEntry(cls.CIDR_ONPREM, None, None, None, "blackhole", "static"),
+                    TgwRouteEntry(cls.CIDR_ONPREM_VPC, None, None, None, "blackhole", "static"),
                     TgwRouteEntry(
-                        "10.2.0.0/16", cls.TGW_ATT_DEV, "vpc", cls.VPC_DEV, "active", "propagated"
+                        cls.CIDR_SHARED, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
-                    TgwRouteEntry(
-                        "10.3.0.0/16",
-                        cls.TGW_ATT_SHARED,
-                        "vpc",
-                        cls.VPC_SHARED,
-                        "active",
-                        "propagated",
-                    ),
-                    TgwRouteEntry(
-                        "10.200.0.0/16",
-                        cls.TGW_ATT_VPN,
-                        "vpn",
-                        "vpn-demo-001",
-                        "active",
-                        "propagated",
-                    ),
-                    TgwRouteEntry(
-                        "0.0.0.0/0",
-                        cls.TGW_ATT_INSPECTION,
-                        "vpc",
-                        cls.VPC_INSPECTION,
-                        "active",
-                        "static",
-                    ),
+                    TgwRouteEntry("0.0.0.0/0", insp, "vpc", cls.VPC_INSPECTION, "active", "static"),
                 ),
-                associations=(cls.TGW_ATT_DEV,),
-                propagations=(cls.TGW_ATT_DEV, cls.TGW_ATT_SHARED, cls.TGW_ATT_VPN),
+                associations=(cls.TGW_ATT_NONPROD,),
+                propagations=(),
             ),
             cls.TGW_RT_SHARED: TgwRouteTableInfo(
                 tgw_rt_id=cls.TGW_RT_SHARED,
@@ -331,35 +505,15 @@ class DemoTopology:
                 name="shared-tgw-rt",
                 routes=(
                     TgwRouteEntry(
-                        "10.1.0.0/16", cls.TGW_ATT_PROD, "vpc", cls.VPC_PROD, "active", "propagated"
+                        cls.CIDR_ONPREM, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
                     TgwRouteEntry(
-                        "10.2.0.0/16", cls.TGW_ATT_DEV, "vpc", cls.VPC_DEV, "active", "propagated"
+                        cls.CIDR_ONPREM_VPC, insp, "vpc", cls.VPC_INSPECTION, "active", "static"
                     ),
-                    TgwRouteEntry(
-                        "10.3.0.0/16",
-                        cls.TGW_ATT_SHARED,
-                        "vpc",
-                        cls.VPC_SHARED,
-                        "active",
-                        "propagated",
-                    ),
-                    TgwRouteEntry(
-                        "10.200.0.0/16",
-                        cls.TGW_ATT_VPN,
-                        "vpn",
-                        "vpn-demo-001",
-                        "active",
-                        "propagated",
-                    ),
+                    TgwRouteEntry("0.0.0.0/0", insp, "vpc", cls.VPC_INSPECTION, "active", "static"),
                 ),
                 associations=(cls.TGW_ATT_SHARED,),
-                propagations=(
-                    cls.TGW_ATT_PROD,
-                    cls.TGW_ATT_DEV,
-                    cls.TGW_ATT_SHARED,
-                    cls.TGW_ATT_VPN,
-                ),
+                propagations=(),
             ),
             cls.TGW_RT_INSPECTION: TgwRouteTableInfo(
                 tgw_rt_id=cls.TGW_RT_INSPECTION,
@@ -367,19 +521,58 @@ class DemoTopology:
                 name="inspection-tgw-rt",
                 routes=(
                     TgwRouteEntry(
-                        "10.1.0.0/16", cls.TGW_ATT_PROD, "vpc", cls.VPC_PROD, "active", "static"
+                        cls.CIDR_PROD, cls.TGW_ATT_PROD, "vpc", cls.VPC_PROD, "active", "static"
                     ),
                     TgwRouteEntry(
-                        "10.2.0.0/16", cls.TGW_ATT_DEV, "vpc", cls.VPC_DEV, "active", "static"
+                        cls.CIDR_NONPROD,
+                        cls.TGW_ATT_NONPROD,
+                        "vpc",
+                        cls.VPC_NONPROD,
+                        "active",
+                        "static",
                     ),
                     TgwRouteEntry(
-                        "10.3.0.0/16", cls.TGW_ATT_SHARED, "vpc", cls.VPC_SHARED, "active", "static"
+                        cls.CIDR_SHARED,
+                        cls.TGW_ATT_SHARED,
+                        "vpc",
+                        cls.VPC_SHARED,
+                        "active",
+                        "static",
                     ),
                     TgwRouteEntry(
-                        "10.200.0.0/16", cls.TGW_ATT_VPN, "vpn", "vpn-demo-001", "active", "static"
+                        cls.CIDR_ONPREM,
+                        cls.TGW_ATT_VPN,
+                        "vpn",
+                        "vpn-demo-001",
+                        "active",
+                        "propagated",
+                    ),
+                    TgwRouteEntry(
+                        cls.CIDR_ONPREM_VPC,
+                        cls.TGW_ATT_VPN,
+                        "vpn",
+                        "vpn-demo-001",
+                        "active",
+                        "static",
                     ),
                 ),
                 associations=(cls.TGW_ATT_INSPECTION,),
+                propagations=(
+                    cls.TGW_ATT_PROD,
+                    cls.TGW_ATT_NONPROD,
+                    cls.TGW_ATT_SHARED,
+                    cls.TGW_ATT_VPN,
+                ),
+            ),
+            cls.TGW_RT_ONPREM: TgwRouteTableInfo(
+                tgw_rt_id=cls.TGW_RT_ONPREM,
+                tgw_id=cls.TGW_ID,
+                name="onprem-tgw-rt",
+                routes=(
+                    TgwRouteEntry(cls.CIDR_NONPROD, None, None, None, "blackhole", "static"),
+                    TgwRouteEntry("0.0.0.0/0", insp, "vpc", cls.VPC_INSPECTION, "active", "static"),
+                ),
+                associations=(cls.TGW_ATT_VPN,),
                 propagations=(),
             ),
         }
@@ -389,7 +582,7 @@ class DemoTopology:
         return {
             cls.SUBNET_PROD_APP: "rtb-prod-001",
             cls.SUBNET_PROD_DB: "rtb-prod-001",
-            cls.SUBNET_DEV_APP: "rtb-dev-001",
+            cls.SUBNET_NONPROD_APP: "rtb-nonprod-001",
             cls.SUBNET_SHARED_DNS: "rtb-shared-001",
             cls.SUBNET_INSPECTION: "rtb-inspection-001",
         }
@@ -399,7 +592,7 @@ class DemoTopology:
         return {
             cls.SUBNET_PROD_APP: cls.NACL_PROD,
             cls.SUBNET_PROD_DB: cls.NACL_PROD,
-            cls.SUBNET_DEV_APP: cls.NACL_DEV,
+            cls.SUBNET_NONPROD_APP: cls.NACL_NONPROD,
             cls.SUBNET_SHARED_DNS: cls.NACL_SHARED,
         }
 
@@ -408,7 +601,7 @@ class DemoTopology:
         return {
             cls.ENI_PROD_APP: [cls.SG_PROD_APP],
             cls.ENI_PROD_DB: [cls.SG_PROD_DB],
-            cls.ENI_DEV_APP: [cls.SG_DEV_APP],
+            cls.ENI_NONPROD_APP: [cls.SG_NONPROD_APP],
             cls.ENI_SHARED_DNS: [cls.SG_SHARED_DNS],
         }
 
@@ -417,7 +610,7 @@ class DemoTopology:
         return {
             cls.SUBNET_PROD_APP: cls.VPC_PROD,
             cls.SUBNET_PROD_DB: cls.VPC_PROD,
-            cls.SUBNET_DEV_APP: cls.VPC_DEV,
+            cls.SUBNET_NONPROD_APP: cls.VPC_NONPROD,
             cls.SUBNET_SHARED_DNS: cls.VPC_SHARED,
             cls.SUBNET_INSPECTION: cls.VPC_INSPECTION,
         }
@@ -426,28 +619,29 @@ class DemoTopology:
     def _build_tgw_attachment_rt_mapping(cls) -> dict[str, str]:
         return {
             cls.TGW_ATT_PROD: cls.TGW_RT_PROD,
-            cls.TGW_ATT_DEV: cls.TGW_RT_DEV,
+            cls.TGW_ATT_NONPROD: cls.TGW_RT_NONPROD,
             cls.TGW_ATT_SHARED: cls.TGW_RT_SHARED,
             cls.TGW_ATT_INSPECTION: cls.TGW_RT_INSPECTION,
+            cls.TGW_ATT_VPN: cls.TGW_RT_ONPREM,
         }
 
     @classmethod
     def _build_vpc_tgw_attachment_mapping(cls) -> dict[str, str]:
         return {
             cls.VPC_PROD: cls.TGW_ATT_PROD,
-            cls.VPC_DEV: cls.TGW_ATT_DEV,
+            cls.VPC_NONPROD: cls.TGW_ATT_NONPROD,
             cls.VPC_SHARED: cls.TGW_ATT_SHARED,
             cls.VPC_INSPECTION: cls.TGW_ATT_INSPECTION,
         }
 
 
 def load_demo_topology() -> NetworkTopology:
-    """Load the default demo topology."""
+    """Load the default landing-zone demo topology."""
     return DemoTopology.build_healthy_topology()
 
 
 def topology_to_json(topology: NetworkTopology) -> dict[str, Any]:
-    """Convert topology to JSON-serializable dict."""
+    """Convert topology to a JSON-serializable dict."""
 
     def _route_to_dict(r: RouteEntry) -> dict[str, Any]:
         return {
@@ -542,5 +736,4 @@ def topology_to_json(topology: NetworkTopology) -> dict[str, Any]:
 
 def save_topology_to_file(topology: NetworkTopology, path: Path) -> None:
     """Save topology to a JSON file."""
-    data = topology_to_json(topology)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(topology_to_json(topology), indent=2))

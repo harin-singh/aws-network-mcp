@@ -59,6 +59,17 @@ resource "aws_iam_policy" "aws_network_mcp_readonly" {
         Resource = "*"
       },
       {
+        Sid    = "NetworkFirewallReadOnly"
+        Effect = "Allow"
+        Action = [
+          "network-firewall:ListFirewalls",
+          "network-firewall:DescribeFirewall",
+          "network-firewall:DescribeFirewallPolicy",
+          "network-firewall:DescribeRuleGroup",
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "CloudWatchLogsQuery"
         Effect = "Allow"
         Action = [

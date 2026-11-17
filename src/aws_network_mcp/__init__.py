@@ -1,3 +1,3 @@
-"""AWS Network MCP Server - AI-assisted AWS network troubleshooting."""
+"""MCP server for hybrid AWS path analysis."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

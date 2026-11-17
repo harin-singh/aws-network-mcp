@@ -1,0 +1,11 @@
+# Describe/List APIs used by this read-only MCP server operate account-wide.
+# AWS does not support resource-level ARNs for ec2:Describe*, logs:StartQuery,
+# or the equivalent Route 53 Resolver / Network Firewall list calls.
+skip-check:
+  - CKV_AWS_355
+  - CKV_AWS_290
+  - CKV2_AWS_5
+compact: true
+quiet: true
+directory:
+  - iam

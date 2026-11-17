@@ -6,7 +6,7 @@ NACL, Transit Gateway, VPN, and Direct Connect resources.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import boto3
 
@@ -48,10 +48,17 @@ def _get_name_tag(tags: Any) -> str | None:
 class EC2Client:
     """Read-only EC2 client for network resource discovery."""
 
-    def __init__(self, region: str | None = None, session: boto3.Session | None = None):
+    def __init__(
+        self,
+        region: str | None = None,
+        session: boto3.Session | None = None,
+        client: Boto3EC2Client | None = None,
+    ):
         self._session = session or boto3.Session()
-        self._region = region or self._session.region_name
-        self._client: Boto3EC2Client = self._session.client("ec2", region_name=self._region)
+        self._region = region or self._session.region_name or "us-east-1"
+        self._client: Boto3EC2Client = client or self._session.client(
+            "ec2", region_name=self._region
+        )
 
     def get_instance_network_info(self, instance_id: str) -> NetworkEndpoint | None:
         """Get network endpoint info for an EC2 instance."""
@@ -121,32 +128,7 @@ class EC2Client:
         if not tables:
             return None
 
-        rt = tables[0]
-        routes: list[RouteEntry] = []
-        for route in rt.get("Routes", []):
-            dest = route.get("DestinationCidrBlock") or route.get("DestinationIpv6CidrBlock", "")
-            target_type, target_id = self._extract_route_target(route)
-            routes.append(
-                RouteEntry(
-                    destination_cidr=dest,
-                    target_type=target_type,
-                    target_id=target_id,
-                    state="active" if route.get("State") == "active" else "blackhole",
-                    prefix_list_id=route.get("DestinationPrefixListId"),
-                )
-            )
-
-        associations = [
-            a.get("SubnetId", "") for a in rt.get("Associations", []) if a.get("SubnetId")
-        ]
-
-        return RouteTableInfo(
-            route_table_id=route_table_id,
-            vpc_id=rt.get("VpcId", ""),
-            name=_get_name_tag(rt.get("Tags")),
-            routes=tuple(routes),
-            subnet_associations=tuple(associations),
-        )
+        return self._parse_route_table(tables[0])
 
     def _extract_route_target(self, route: Any) -> tuple[str, str]:
         """Extract target type and ID from a route."""
@@ -164,17 +146,39 @@ class EC2Client:
             return "local-gateway", route["LocalGatewayId"]
         return "local", "local"
 
+    def _parse_route_table(self, rt: Any) -> RouteTableInfo:
+        routes: list[RouteEntry] = []
+        for route in rt.get("Routes", []):
+            dest = route.get("DestinationCidrBlock") or route.get("DestinationIpv6CidrBlock", "")
+            target_type, target_id = self._extract_route_target(route)
+            origin = str(route.get("Origin") or "")
+            routes.append(
+                RouteEntry(
+                    destination_cidr=dest,
+                    target_type=target_type,
+                    target_id=target_id,
+                    state="active" if route.get("State") == "active" else "blackhole",
+                    propagated=origin == "EnableVgwRoutePropagation",
+                    prefix_list_id=route.get("DestinationPrefixListId"),
+                )
+            )
+        associations = [
+            a.get("SubnetId", "") for a in rt.get("Associations", []) if a.get("SubnetId")
+        ]
+        return RouteTableInfo(
+            route_table_id=rt.get("RouteTableId", ""),
+            vpc_id=rt.get("VpcId", ""),
+            name=_get_name_tag(rt.get("Tags")),
+            routes=tuple(routes),
+            subnet_associations=tuple(associations),
+        )
+
     def get_route_tables_for_vpc(self, vpc_id: str) -> list[RouteTableInfo]:
         """Get all route tables in a VPC."""
         response = self._client.describe_route_tables(
             Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
         )
-        result = []
-        for rt in response.get("RouteTables", []):
-            rt_id = rt.get("RouteTableId", "")
-            if rt_info := self.get_route_table(rt_id):
-                result.append(rt_info)
-        return result
+        return [self._parse_route_table(rt) for rt in response.get("RouteTables", [])]
 
     def get_subnet_route_table(self, subnet_id: str) -> RouteTableInfo | None:
         """Get the route table associated with a subnet."""
@@ -212,23 +216,24 @@ class EC2Client:
         if not groups:
             return None
 
-        sg = groups[0]
-        rules: list[SecurityGroupRule] = []
+        return self._parse_security_group(groups[0])
 
+    def _parse_security_group(self, sg: Any) -> SecurityGroupInfo:
+        rules: list[SecurityGroupRule] = []
         for rule in sg.get("IpPermissions", []):
             rules.extend(self._parse_sg_rules(rule, "ingress"))
-
         for rule in sg.get("IpPermissionsEgress", []):
             rules.extend(self._parse_sg_rules(rule, "egress"))
-
         return SecurityGroupInfo(
-            sg_id=sg_id,
+            sg_id=sg.get("GroupId", ""),
             name=sg.get("GroupName", ""),
             vpc_id=sg.get("VpcId", ""),
             rules=tuple(rules),
         )
 
-    def _parse_sg_rules(self, rule: Any, direction: str) -> list[SecurityGroupRule]:
+    def _parse_sg_rules(
+        self, rule: Any, direction: Literal["ingress", "egress"]
+    ) -> list[SecurityGroupRule]:
         """Parse security group permission into rule objects."""
         results: list[SecurityGroupRule] = []
         protocol = str(rule.get("IpProtocol", "-1"))
@@ -238,7 +243,7 @@ class EC2Client:
         for ip_range in rule.get("IpRanges", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -250,7 +255,7 @@ class EC2Client:
         for ip_range in rule.get("Ipv6Ranges", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -262,7 +267,7 @@ class EC2Client:
         for sg_ref in rule.get("UserIdGroupPairs", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -274,7 +279,7 @@ class EC2Client:
         for pl in rule.get("PrefixListIds", []):
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -286,7 +291,7 @@ class EC2Client:
         if not results:
             results.append(
                 SecurityGroupRule(
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=from_port,
                     to_port=to_port,
@@ -310,17 +315,20 @@ class EC2Client:
         if not acls:
             return None
 
-        nacl = acls[0]
-        rules: list[NaclRule] = []
+        return self._parse_nacl(acls[0])
 
+    def _parse_nacl(self, nacl: Any) -> NaclInfo:
+        rules: list[NaclRule] = []
         for entry in nacl.get("Entries", []):
-            direction = "ingress" if not entry.get("Egress") else "egress"
+            direction: Literal["ingress", "egress"] = (
+                "ingress" if not entry.get("Egress") else "egress"
+            )
             protocol = str(entry.get("Protocol", "-1"))
             port_range = entry.get("PortRange", {})
             rules.append(
                 NaclRule(
                     rule_number=entry.get("RuleNumber", 0),
-                    direction=direction,  # type: ignore[arg-type]
+                    direction=direction,
                     protocol=protocol,
                     from_port=port_range.get("From"),
                     to_port=port_range.get("To"),
@@ -328,13 +336,11 @@ class EC2Client:
                     action="allow" if entry.get("RuleAction") == "allow" else "deny",
                 )
             )
-
         associations = [
             a.get("SubnetId", "") for a in nacl.get("Associations", []) if a.get("SubnetId")
         ]
-
         return NaclInfo(
-            nacl_id=nacl_id,
+            nacl_id=nacl.get("NetworkAclId", ""),
             vpc_id=nacl.get("VpcId", ""),
             name=_get_name_tag(nacl.get("Tags")),
             rules=tuple(rules),
@@ -366,11 +372,20 @@ class EC2Client:
                 TgwAttachment(
                     attachment_id=att.get("TransitGatewayAttachmentId", ""),
                     tgw_id=att.get("TransitGatewayId", ""),
-                    attachment_type=att.get("ResourceType", "vpc"),  # type: ignore[arg-type]
+                    attachment_type=cast(
+                        Literal["vpc", "vpn", "direct-connect-gateway", "peering", "connect"],
+                        att.get("ResourceType", "vpc")
+                        if att.get("ResourceType")
+                        in {"vpc", "vpn", "direct-connect-gateway", "peering", "connect"}
+                        else "vpc",
+                    ),
                     state=att.get("State", ""),
                     resource_id=att.get("ResourceId", ""),
                     resource_owner_id=att.get("ResourceOwnerId", ""),
                     name=_get_name_tag(att.get("Tags")),
+                    associated_route_table_id=(att.get("Association") or {}).get(
+                        "TransitGatewayRouteTableId"
+                    ),
                 )
             )
 
@@ -386,26 +401,7 @@ class EC2Client:
             return None
 
         rt = tables[0]
-        routes_response = self._client.search_transit_gateway_routes(
-            TransitGatewayRouteTableId=tgw_rt_id,
-            Filters=[{"Name": "state", "Values": ["active", "blackhole"]}],
-        )
-
-        routes: list[TgwRouteEntry] = []
-        for route in routes_response.get("Routes", []):
-            attachments = route.get("TransitGatewayAttachments", [])
-            attachment = attachments[0] if attachments else {}
-            routes.append(
-                TgwRouteEntry(
-                    destination_cidr=route.get("DestinationCidrBlock", ""),
-                    attachment_id=attachment.get("TransitGatewayAttachmentId"),
-                    resource_type=attachment.get("ResourceType"),
-                    resource_id=attachment.get("ResourceId"),
-                    state="active" if route.get("State") == "active" else "blackhole",
-                    route_type="propagated" if route.get("Type") == "propagated" else "static",
-                    prefix_list_id=route.get("PrefixListId"),
-                )
-            )
+        routes = [self._parse_tgw_route(route) for route in self.search_tgw_routes(tgw_rt_id)]
 
         assoc_response = self._client.get_transit_gateway_route_table_associations(
             TransitGatewayRouteTableId=tgw_rt_id
@@ -449,17 +445,25 @@ class EC2Client:
                         outside_ip=tunnel.get("OutsideIpAddress", ""),
                         status="UP" if tunnel.get("Status") == "UP" else "DOWN",
                         status_message=tunnel.get("StatusMessage"),
+                        routes_received=tunnel.get("AcceptedRouteCount"),
                     )
                 )
 
+            static_routes = tuple(
+                str(route.get("DestinationCidrBlock"))
+                for route in vpn.get("Routes", [])
+                if route.get("DestinationCidrBlock")
+            )
+            cgw_ip = vpn.get("CustomerGatewayId") or ""
             result.append(
                 VpnConnectionInfo(
                     vpn_id=vpn.get("VpnConnectionId", ""),
                     state=vpn.get("State", ""),
                     tgw_id=vpn.get("TransitGatewayId"),
-                    customer_gateway_ip=vpn.get("CustomerGatewayConfiguration", ""),
+                    customer_gateway_ip=str(cgw_ip),
                     tunnels=tuple(tunnels),
                     name=_get_name_tag(vpn.get("Tags")),
+                    static_routes=static_routes,
                 )
             )
 
@@ -575,3 +579,103 @@ class EC2Client:
     def delete_reachability_path(self, path_id: str) -> None:
         """Delete a Reachability Analyzer path."""
         self._client.delete_network_insights_path(NetworkInsightsPathId=path_id)
+
+    def list_vpcs(self) -> list[dict[str, Any]]:
+        """Describe all VPCs in the region."""
+        return self._collect("describe_vpcs", "Vpcs")
+
+    def list_subnets(self) -> list[dict[str, Any]]:
+        """Describe all subnets in the region."""
+        return self._collect("describe_subnets", "Subnets")
+
+    def list_route_tables(self) -> list[RouteTableInfo]:
+        """Describe and parse all VPC route tables."""
+        return [
+            self._parse_route_table(rt)
+            for rt in self._collect("describe_route_tables", "RouteTables")
+        ]
+
+    def list_security_groups(self) -> list[SecurityGroupInfo]:
+        """Describe and parse all security groups."""
+        return [
+            self._parse_security_group(sg)
+            for sg in self._collect("describe_security_groups", "SecurityGroups")
+        ]
+
+    def list_nacls(self) -> list[NaclInfo]:
+        """Describe and parse all network ACLs."""
+        return [
+            self._parse_nacl(acl) for acl in self._collect("describe_network_acls", "NetworkAcls")
+        ]
+
+    def list_network_interfaces(self) -> list[dict[str, Any]]:
+        """Describe all ENIs in the region."""
+        return self._collect("describe_network_interfaces", "NetworkInterfaces")
+
+    def list_tgw_route_tables(self, tgw_id: str | None = None) -> list[dict[str, Any]]:
+        """Describe Transit Gateway route tables."""
+        kwargs: dict[str, Any] = {}
+        if tgw_id:
+            kwargs["Filters"] = [{"Name": "transit-gateway-id", "Values": [tgw_id]}]
+        return self._collect(
+            "describe_transit_gateway_route_tables", "TransitGatewayRouteTables", **kwargs
+        )
+
+    def list_prefix_list_cidrs(self) -> dict[str, list[str]]:
+        """Return managed prefix-list IDs mapped to their CIDR entries."""
+        result: dict[str, list[str]] = {}
+        for prefix_list in self._collect("describe_managed_prefix_lists", "PrefixLists"):
+            prefix_list_id = prefix_list.get("PrefixListId")
+            if not prefix_list_id:
+                continue
+            try:
+                result[str(prefix_list_id)] = self.get_prefix_list_entries(str(prefix_list_id))
+            except Exception:
+                result[str(prefix_list_id)] = []
+        return result
+
+    def search_tgw_routes(self, tgw_rt_id: str) -> list[Any]:
+        """Search active and blackhole routes in a TGW route table."""
+        response = self._client.search_transit_gateway_routes(
+            TransitGatewayRouteTableId=tgw_rt_id,
+            Filters=[{"Name": "state", "Values": ["active", "blackhole"]}],
+        )
+        return list(response.get("Routes", []))
+
+    def _parse_tgw_route(self, route: Any) -> TgwRouteEntry:
+        attachments = (
+            route.get("TransitGatewayAttachments") or route.get("transitGatewayAttachments") or []
+        )
+        if isinstance(attachments, dict):
+            attachments = [attachments]
+        attachment = attachments[0] if attachments else {}
+        state_raw = str(route.get("State") or route.get("state") or "")
+        type_raw = str(route.get("Type") or route.get("type") or "")
+        return TgwRouteEntry(
+            destination_cidr=str(
+                route.get("DestinationCidrBlock") or route.get("destinationCidrBlock") or ""
+            ),
+            attachment_id=attachment.get("TransitGatewayAttachmentId")
+            or attachment.get("transitGatewayAttachmentId"),
+            resource_type=attachment.get("ResourceType") or attachment.get("resourceType"),
+            resource_id=attachment.get("ResourceId") or attachment.get("resourceId"),
+            state="active" if state_raw == "active" else "blackhole",
+            route_type="propagated" if type_raw == "propagated" else "static",
+            prefix_list_id=route.get("PrefixListId") or route.get("prefixListId"),
+        )
+
+    def _collect(self, operation: str, result_key: str, **kwargs: Any) -> list[Any]:
+        method = getattr(self._client, operation)
+        items: list[Any] = []
+        token: str | None = None
+        while True:
+            call_kwargs = dict(kwargs)
+            if token:
+                call_kwargs["NextToken"] = token
+            response = method(**call_kwargs)
+            items.extend(list(response.get(result_key, [])))
+            next_token = response.get("NextToken")
+            if not next_token:
+                break
+            token = str(next_token)
+        return items

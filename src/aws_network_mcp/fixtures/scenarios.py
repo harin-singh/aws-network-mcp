@@ -1,7 +1,7 @@
-"""Demo scenarios showing common AWS network misconfigurations.
+"""Demo scenarios for hybrid path analysis.
 
-Each scenario represents a realistic broken configuration that
-the path analyzer should diagnose correctly.
+Includes the original TGW-propagation case plus landing-zone segmentation
+from https://github.com/harin-singh/aws-hybrid-network-landing-zone
 """
 
 from __future__ import annotations
@@ -19,12 +19,13 @@ from aws_network_mcp.models import (
     SecurityGroupRule,
     TgwRouteEntry,
     TgwRouteTableInfo,
+    Verdict,
 )
 
 
 @dataclass
 class DemoScenario:
-    """A demo scenario with a broken configuration."""
+    """A demo scenario with an expected path-analysis verdict."""
 
     name: str
     description: str
@@ -34,117 +35,192 @@ class DemoScenario:
     port: int
     protocol: Protocol
     topology_modifier: str
+    expected_verdict: Verdict
+    expected_blocking_hop_type: str | None = None
+    expect_inspection_bypass: bool = False
+
+
+def _copy_replace_tgw_rt(
+    topology: NetworkTopology,
+    rt_id: str,
+    routes: tuple[TgwRouteEntry, ...],
+    propagations: tuple[str, ...],
+) -> None:
+    existing = topology.tgw_route_tables[rt_id]
+    topology.tgw_route_tables[rt_id] = TgwRouteTableInfo(
+        tgw_rt_id=existing.tgw_rt_id,
+        tgw_id=existing.tgw_id,
+        name=existing.name,
+        routes=routes,
+        associations=existing.associations,
+        propagations=propagations,
+    )
 
 
 def _scenario_missing_tgw_propagation() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: Dev VPC cannot reach prod VPC because TGW route propagation
-    is missing for the prod attachment in the dev route table.
-    Note: Also removes the default route to ensure the missing propagation is detected.
-    """
+    """Inspection RT is missing the BGP-learned on-prem prefix."""
     topology = DemoTopology.build_healthy_topology()
-
-    dev_tgw_rt = topology.tgw_route_tables[DemoTopology.TGW_RT_DEV]
+    insp = topology.tgw_route_tables[DemoTopology.TGW_RT_INSPECTION]
     new_routes = tuple(
-        r for r in dev_tgw_rt.routes if r.destination_cidr not in ("10.1.0.0/16", "0.0.0.0/0")
+        r
+        for r in insp.routes
+        if r.destination_cidr not in (DemoTopology.CIDR_ONPREM, DemoTopology.CIDR_ONPREM_VPC)
     )
-    new_propagations = tuple(p for p in dev_tgw_rt.propagations if p != DemoTopology.TGW_ATT_PROD)
-    topology.tgw_route_tables[DemoTopology.TGW_RT_DEV] = TgwRouteTableInfo(
-        tgw_rt_id=dev_tgw_rt.tgw_rt_id,
-        tgw_id=dev_tgw_rt.tgw_id,
-        name=dev_tgw_rt.name,
-        routes=new_routes,
-        associations=dev_tgw_rt.associations,
-        propagations=new_propagations,
-    )
+    new_props = tuple(p for p in insp.propagations if p != DemoTopology.TGW_ATT_VPN)
+    _copy_replace_tgw_rt(topology, DemoTopology.TGW_RT_INSPECTION, new_routes, new_props)
 
     scenario = DemoScenario(
         name="missing_tgw_propagation",
-        description="Dev VPC cannot reach Prod VPC - TGW propagation missing",
-        expected_diagnosis="No TGW route found for 10.1.0.50 - prod VPC attachment not propagating to dev route table",
-        source=NetworkEndpoint(
-            ip="10.2.0.100",
-            vpc_id=DemoTopology.VPC_DEV,
-            subnet_id=DemoTopology.SUBNET_DEV_APP,
-            eni_id=DemoTopology.ENI_DEV_APP,
+        description="Prod cannot reach on-prem — VPN prefix not propagated to the inspection RT",
+        expected_diagnosis=(
+            "Inspection TGW route table has no route for 10.200.1.50 because the VPN "
+            "attachment is not propagating"
         ),
-        destination=NetworkEndpoint(
-            ip="10.1.0.50",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_APP,
-            eni_id=DemoTopology.ENI_PROD_APP,
-        ),
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_ONPREM],
         port=443,
         protocol=Protocol.TCP,
-        topology_modifier="removed prod propagation from dev TGW route table",
+        topology_modifier="removed VPN propagation and on-prem routes from inspection TGW RT",
+        expected_verdict=Verdict.DENY,
+        expected_blocking_hop_type="transit_gateway",
     )
-
     return scenario, topology
 
 
 def _scenario_blackhole_route() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: Traffic to on-prem goes to a blackhole because the VPN
-    attachment was deleted but the route remains pointing to it.
-    """
+    """On-prem route on the inspection RT is blackholed (VPN attachment gone)."""
     topology = DemoTopology.build_healthy_topology()
-
-    prod_tgw_rt = topology.tgw_route_tables[DemoTopology.TGW_RT_PROD]
-    new_routes: list[TgwRouteEntry] = []
-    for route in prod_tgw_rt.routes:
-        if route.destination_cidr == "10.200.0.0/16":
-            new_routes.append(
-                TgwRouteEntry(
-                    destination_cidr=route.destination_cidr,
-                    attachment_id=route.attachment_id,
-                    resource_type=route.resource_type,
-                    resource_id=route.resource_id,
-                    state="blackhole",
-                    route_type=route.route_type,
-                )
-            )
-        else:
-            new_routes.append(route)
-
-    topology.tgw_route_tables[DemoTopology.TGW_RT_PROD] = TgwRouteTableInfo(
-        tgw_rt_id=prod_tgw_rt.tgw_rt_id,
-        tgw_id=prod_tgw_rt.tgw_id,
-        name=prod_tgw_rt.name,
-        routes=tuple(new_routes),
-        associations=prod_tgw_rt.associations,
-        propagations=prod_tgw_rt.propagations,
+    insp = topology.tgw_route_tables[DemoTopology.TGW_RT_INSPECTION]
+    new_routes = tuple(
+        TgwRouteEntry(
+            r.destination_cidr,
+            r.attachment_id,
+            r.resource_type,
+            r.resource_id,
+            "blackhole" if r.destination_cidr == DemoTopology.CIDR_ONPREM else r.state,
+            r.route_type,
+        )
+        for r in insp.routes
     )
+    _copy_replace_tgw_rt(topology, DemoTopology.TGW_RT_INSPECTION, new_routes, insp.propagations)
 
     scenario = DemoScenario(
         name="blackhole_route",
-        description="Prod VPC cannot reach on-prem - TGW route is blackholed",
-        expected_diagnosis="TGW route to 10.200.0.0/16 is blackholed - VPN attachment may be deleted or detached",
-        source=NetworkEndpoint(
-            ip="10.1.0.100",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_APP,
-            eni_id=DemoTopology.ENI_PROD_APP,
-        ),
-        destination=NetworkEndpoint(
-            ip="10.200.1.50",
-            is_on_prem=True,
-        ),
+        description="Prod cannot reach on-prem — inspection RT blackholes the BGP prefix",
+        expected_diagnosis="TGW route to 10.200.0.0/16 is blackholed on the inspection route table",
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_ONPREM],
         port=443,
         protocol=Protocol.TCP,
-        topology_modifier="set on-prem route to blackhole state",
+        topology_modifier="set 10.200.0.0/16 to blackhole on inspection TGW RT",
+        expected_verdict=Verdict.BLACKHOLE,
+        expected_blocking_hop_type="transit_gateway",
+    )
+    return scenario, topology
+
+
+def _scenario_prod_nonprod_blocked() -> tuple[DemoScenario, NetworkTopology]:
+    topology = DemoTopology.build_healthy_topology()
+    scenario = DemoScenario(
+        name="prod_nonprod_blocked",
+        description="Prod to nonprod is dropped by a TGW blackhole; firewall would also drop",
+        expected_diagnosis=(
+            "Prod TGW RT has a static blackhole for 10.20.0.0/24; Network Firewall "
+            "sid:1000001 would also drop the flow"
+        ),
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_NONPROD_APP],
+        port=443,
+        protocol=Protocol.TCP,
+        topology_modifier="none (landing-zone segmentation)",
+        expected_verdict=Verdict.BLACKHOLE,
+        expected_blocking_hop_type="transit_gateway",
+    )
+    return scenario, topology
+
+
+def _scenario_nonprod_onprem_blocked() -> tuple[DemoScenario, NetworkTopology]:
+    topology = DemoTopology.build_healthy_topology()
+    scenario = DemoScenario(
+        name="nonprod_onprem_blocked",
+        description="Nonprod to on-prem is dropped by a TGW blackhole; firewall would also drop",
+        expected_diagnosis=(
+            "Nonprod TGW RT blackholes 10.200.0.0/16; Network Firewall sid:1000003 "
+            "would also drop nonprod to on-prem"
+        ),
+        source=topology.known_endpoints[DemoTopology.IP_NONPROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_ONPREM],
+        port=443,
+        protocol=Protocol.TCP,
+        topology_modifier="none (landing-zone segmentation)",
+        expected_verdict=Verdict.BLACKHOLE,
+        expected_blocking_hop_type="transit_gateway",
+    )
+    return scenario, topology
+
+
+def _scenario_spoke_onprem_via_inspection() -> tuple[DemoScenario, NetworkTopology]:
+    topology = DemoTopology.build_healthy_topology()
+    scenario = DemoScenario(
+        name="spoke_onprem_via_inspection",
+        description="Prod reaches on-prem via inspection (static to NFW, then BGP-learned VPN route)",
+        expected_diagnosis=(
+            "Prod RT 10.200.0.0/16 static via inspection; firewall sid:2000005 pass; "
+            "inspection RT 10.200.0.0/16 propagated to the VPN attachment"
+        ),
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_ONPREM],
+        port=443,
+        protocol=Protocol.TCP,
+        topology_modifier="none (allowed landing-zone path)",
+        expected_verdict=Verdict.ALLOW,
+    )
+    return scenario, topology
+
+
+def _scenario_inspection_bypass() -> tuple[DemoScenario, NetworkTopology]:
+    """Nonprod attachment is propagated onto the prod RT, skipping inspection."""
+    topology = DemoTopology.build_healthy_topology()
+    prod_rt = topology.tgw_route_tables[DemoTopology.TGW_RT_PROD]
+    new_routes = tuple(
+        r for r in prod_rt.routes if r.destination_cidr != DemoTopology.CIDR_NONPROD
+    ) + (
+        TgwRouteEntry(
+            DemoTopology.CIDR_NONPROD,
+            DemoTopology.TGW_ATT_NONPROD,
+            "vpc",
+            DemoTopology.VPC_NONPROD,
+            "active",
+            "propagated",
+        ),
+    )
+    _copy_replace_tgw_rt(
+        topology,
+        DemoTopology.TGW_RT_PROD,
+        new_routes,
+        (DemoTopology.TGW_ATT_NONPROD,),
     )
 
+    scenario = DemoScenario(
+        name="inspection_bypass_propagation",
+        description="Nonprod prefix is propagated onto the prod RT, bypassing inspection",
+        expected_diagnosis=(
+            "More-specific propagated route 10.20.0.0/24 -> tgw-attach-nonprod-002 "
+            "skips the inspection attachment"
+        ),
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_NONPROD_APP],
+        port=443,
+        protocol=Protocol.TCP,
+        topology_modifier="replaced prod blackhole with a propagated route to the nonprod attachment",
+        expected_verdict=Verdict.ALLOW,
+        expect_inspection_bypass=True,
+    )
     return scenario, topology
 
 
 def _scenario_sg_missing_return_rule() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: App server cannot connect to database because the DB security
-    group only allows connections from a specific security group, but the
-    app is using a different one.
-    """
     topology = DemoTopology.build_healthy_topology()
-
     wrong_sg = SecurityGroupInfo(
         sg_id="sg-wrong-app-001",
         name="wrong-app-sg",
@@ -161,86 +237,54 @@ def _scenario_sg_missing_return_rule() -> tuple[DemoScenario, NetworkTopology]:
 
     scenario = DemoScenario(
         name="sg_missing_return_rule",
-        description="App cannot connect to DB - wrong security group reference",
-        expected_diagnosis="DB security group only allows ingress from sg-prod-app-001, but app is using sg-wrong-app-001",
-        source=NetworkEndpoint(
-            ip="10.1.0.100",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_APP,
-            eni_id=DemoTopology.ENI_PROD_APP,
-        ),
-        destination=NetworkEndpoint(
-            ip="10.1.1.50",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_DB,
-            eni_id=DemoTopology.ENI_PROD_DB,
-        ),
+        description="App cannot connect to DB — wrong security group reference",
+        expected_diagnosis="DB SG only allows ingress from sg-prod-app-001, but the app uses sg-wrong-app-001",
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_PROD_DB],
         port=5432,
         protocol=Protocol.TCP,
-        topology_modifier="changed app server to use different security group",
+        topology_modifier="changed app ENI to a security group the DB SG does not reference",
+        expected_verdict=Verdict.DENY,
+        expected_blocking_hop_type="security_group",
     )
-
     return scenario, topology
 
 
 def _scenario_sg_wrong_port() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: Service connection fails because security group allows
-    port 80 but application is trying to connect on port 8080.
-    """
     topology = DemoTopology.build_healthy_topology()
-
-    wrong_port_sg = SecurityGroupInfo(
-        sg_id=DemoTopology.SG_PROD_APP,
-        name="prod-app-sg",
-        vpc_id=DemoTopology.VPC_PROD,
+    topology.security_groups[DemoTopology.SG_SHARED_DNS] = SecurityGroupInfo(
+        sg_id=DemoTopology.SG_SHARED_DNS,
+        name="shared-dns-sg",
+        vpc_id=DemoTopology.VPC_SHARED,
         rules=(
             SecurityGroupRule("ingress", "6", 80, 80, "10.0.0.0/8", description="HTTP only"),
-            SecurityGroupRule("ingress", "6", 22, 22, "10.3.0.0/16", description="SSH from shared"),
             SecurityGroupRule(
                 "egress", "-1", None, None, "0.0.0.0/0", description="Allow all outbound"
             ),
         ),
     )
-    topology.security_groups[DemoTopology.SG_PROD_APP] = wrong_port_sg
 
     scenario = DemoScenario(
         name="sg_wrong_port",
-        description="HTTPS connection fails - security group only allows HTTP",
-        expected_diagnosis="Security group allows port 80 but connection attempt is on port 443",
-        source=NetworkEndpoint(
-            ip="10.2.0.100",
-            vpc_id=DemoTopology.VPC_DEV,
-            subnet_id=DemoTopology.SUBNET_DEV_APP,
-            eni_id=DemoTopology.ENI_DEV_APP,
-        ),
-        destination=NetworkEndpoint(
-            ip="10.1.0.100",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_APP,
-            eni_id=DemoTopology.ENI_PROD_APP,
-        ),
+        description="Prod to shared HTTPS fails — destination SG only allows HTTP",
+        expected_diagnosis="Shared SG allows port 80 but the connection is on port 443",
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_SHARED_DNS],
         port=443,
         protocol=Protocol.TCP,
-        topology_modifier="changed prod-app-sg to only allow port 80",
+        topology_modifier="changed shared-dns-sg to only allow port 80",
+        expected_verdict=Verdict.DENY,
+        expected_blocking_hop_type="security_group",
     )
-
     return scenario, topology
 
 
 def _scenario_nacl_blocking_ephemeral() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: Connection hangs because NACL doesn't allow return traffic
-    on ephemeral ports. NACLs are stateless!
-
-    The source (dev) NACL only allows specific ports, not ephemeral return traffic.
-    """
     topology = DemoTopology.build_healthy_topology()
-
-    strict_nacl = NaclInfo(
-        nacl_id=DemoTopology.NACL_DEV,
-        vpc_id=DemoTopology.VPC_DEV,
-        name="dev-nacl-strict",
+    topology.nacls[DemoTopology.NACL_PROD] = NaclInfo(
+        nacl_id=DemoTopology.NACL_PROD,
+        vpc_id=DemoTopology.VPC_PROD,
+        name="prod-nacl-strict",
         rules=(
             NaclRule(100, "ingress", "6", 443, 443, "10.0.0.0/8", "allow"),
             NaclRule(110, "ingress", "6", 22, 22, "10.0.0.0/8", "allow"),
@@ -248,100 +292,34 @@ def _scenario_nacl_blocking_ephemeral() -> tuple[DemoScenario, NetworkTopology]:
             NaclRule(100, "egress", "-1", None, None, "0.0.0.0/0", "allow"),
             NaclRule(32767, "egress", "-1", None, None, "0.0.0.0/0", "deny"),
         ),
-        subnet_associations=(DemoTopology.SUBNET_DEV_APP,),
+        subnet_associations=(DemoTopology.SUBNET_PROD_APP, DemoTopology.SUBNET_PROD_DB),
     )
-    topology.nacls[DemoTopology.NACL_DEV] = strict_nacl
 
     scenario = DemoScenario(
         name="nacl_blocking_ephemeral",
-        description="Connections from dev hang - NACL blocks return traffic",
-        expected_diagnosis="NACL is stateless - allows egress but no rule for ephemeral return ports 1024-65535",
-        source=NetworkEndpoint(
-            ip="10.2.0.100",
-            vpc_id=DemoTopology.VPC_DEV,
-            subnet_id=DemoTopology.SUBNET_DEV_APP,
-            eni_id=DemoTopology.ENI_DEV_APP,
-        ),
-        destination=NetworkEndpoint(
-            ip="10.1.0.100",
-            vpc_id=DemoTopology.VPC_PROD,
-            subnet_id=DemoTopology.SUBNET_PROD_APP,
-            eni_id=DemoTopology.ENI_PROD_APP,
-        ),
+        description="Prod to shared hangs — source NACL blocks ephemeral return traffic",
+        expected_diagnosis="NACL is stateless — no rule for ephemeral return ports 1024-65535",
+        source=topology.known_endpoints[DemoTopology.IP_PROD_APP],
+        destination=topology.known_endpoints[DemoTopology.IP_SHARED_DNS],
         port=443,
         protocol=Protocol.TCP,
-        topology_modifier="removed ephemeral port ingress rule from dev NACL",
+        topology_modifier="removed ephemeral port ingress rule from prod NACL",
+        expected_verdict=Verdict.DENY,
+        expected_blocking_hop_type="nacl_return",
     )
-
-    return scenario, topology
-
-
-def _scenario_asymmetric_routing() -> tuple[DemoScenario, NetworkTopology]:
-    """
-    Scenario: Traffic from shared-services to dev works, but return traffic
-    goes through inspection VPC, causing asymmetric routing issues.
-    """
-    topology = DemoTopology.build_healthy_topology()
-
-    dev_tgw_rt = topology.tgw_route_tables[DemoTopology.TGW_RT_DEV]
-    new_routes = tuple(
-        TgwRouteEntry(
-            destination_cidr=r.destination_cidr,
-            attachment_id=DemoTopology.TGW_ATT_INSPECTION
-            if r.destination_cidr == "10.3.0.0/16"
-            else r.attachment_id,
-            resource_type="vpc" if r.destination_cidr == "10.3.0.0/16" else r.resource_type,
-            resource_id=DemoTopology.VPC_INSPECTION
-            if r.destination_cidr == "10.3.0.0/16"
-            else r.resource_id,
-            state=r.state,
-            route_type="static" if r.destination_cidr == "10.3.0.0/16" else r.route_type,
-        )
-        for r in dev_tgw_rt.routes
-    )
-    topology.tgw_route_tables[DemoTopology.TGW_RT_DEV] = TgwRouteTableInfo(
-        tgw_rt_id=dev_tgw_rt.tgw_rt_id,
-        tgw_id=dev_tgw_rt.tgw_id,
-        name=dev_tgw_rt.name,
-        routes=new_routes,
-        associations=dev_tgw_rt.associations,
-        propagations=dev_tgw_rt.propagations,
-    )
-
-    scenario = DemoScenario(
-        name="asymmetric_routing",
-        description="Dev to shared-services has asymmetric routing through inspection VPC",
-        expected_diagnosis="Return traffic routes through inspection VPC instead of direct path - may cause connection issues with stateful firewalls",
-        source=NetworkEndpoint(
-            ip="10.2.0.100",
-            vpc_id=DemoTopology.VPC_DEV,
-            subnet_id=DemoTopology.SUBNET_DEV_APP,
-            eni_id=DemoTopology.ENI_DEV_APP,
-        ),
-        destination=NetworkEndpoint(
-            ip="10.3.0.50",
-            vpc_id=DemoTopology.VPC_SHARED,
-            subnet_id=DemoTopology.SUBNET_SHARED_DNS,
-            eni_id=DemoTopology.ENI_SHARED_DNS,
-        ),
-        port=53,
-        protocol=Protocol.UDP,
-        topology_modifier="dev-to-shared route goes through inspection VPC",
-    )
-
     return scenario, topology
 
 
 DEMO_SCENARIOS: dict[str, tuple[DemoScenario, NetworkTopology]] = {
     "missing_tgw_propagation": _scenario_missing_tgw_propagation(),
     "blackhole_route": _scenario_blackhole_route(),
+    "prod_nonprod_blocked": _scenario_prod_nonprod_blocked(),
+    "nonprod_onprem_blocked": _scenario_nonprod_onprem_blocked(),
+    "spoke_onprem_via_inspection": _scenario_spoke_onprem_via_inspection(),
+    "inspection_bypass_propagation": _scenario_inspection_bypass(),
     "sg_missing_return_rule": _scenario_sg_missing_return_rule(),
     "sg_wrong_port": _scenario_sg_wrong_port(),
     "nacl_blocking_ephemeral": _scenario_nacl_blocking_ephemeral(),
-}
-
-INFORMATIONAL_SCENARIOS: dict[str, tuple[DemoScenario, NetworkTopology]] = {
-    "asymmetric_routing": _scenario_asymmetric_routing(),
 }
 
 

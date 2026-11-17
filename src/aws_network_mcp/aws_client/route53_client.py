@@ -15,10 +15,15 @@ if TYPE_CHECKING:
 class Route53ResolverClient:
     """Read-only Route 53 Resolver client for DNS troubleshooting."""
 
-    def __init__(self, region: str | None = None, session: boto3.Session | None = None):
+    def __init__(
+        self,
+        region: str | None = None,
+        session: boto3.Session | None = None,
+        client: Boto3R53Client | None = None,
+    ):
         self._session = session or boto3.Session()
-        self._region = region or self._session.region_name
-        self._client: Boto3R53Client = self._session.client(
+        self._region = region or self._session.region_name or "us-east-1"
+        self._client: Boto3R53Client = client or self._session.client(
             "route53resolver", region_name=self._region
         )
 

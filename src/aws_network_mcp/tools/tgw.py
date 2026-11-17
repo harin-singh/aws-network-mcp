@@ -45,18 +45,34 @@ def list_tgw_attachments(
 
     if topology:
         attachments_list = []
-        for vpc_id, att_id in topology.vpc_to_tgw_attachment.items():
-            rt_id = topology.tgw_attachment_to_route_table.get(att_id, "unknown")
-            attachments_list.append(
-                {
-                    "attachment_id": att_id,
-                    "tgw_id": "tgw-demo-001",
-                    "type": "vpc",
-                    "state": "available",
-                    "resource_id": vpc_id,
-                    "associated_route_table": rt_id,
-                }
-            )
+        if topology.attachments:
+            for att in topology.attachments.values():
+                attachments_list.append(
+                    {
+                        "attachment_id": att.attachment_id,
+                        "tgw_id": att.tgw_id,
+                        "type": att.attachment_type,
+                        "state": att.state,
+                        "resource_id": att.resource_id,
+                        "name": att.name,
+                        "associated_route_table": topology.tgw_attachment_to_route_table.get(
+                            att.attachment_id, "unknown"
+                        ),
+                    }
+                )
+        else:
+            for vpc_id, att_id in topology.vpc_to_tgw_attachment.items():
+                rt_id = topology.tgw_attachment_to_route_table.get(att_id, "unknown")
+                attachments_list.append(
+                    {
+                        "attachment_id": att_id,
+                        "tgw_id": "tgw-demo-001",
+                        "type": "vpc",
+                        "state": "available",
+                        "resource_id": vpc_id,
+                        "associated_route_table": rt_id,
+                    }
+                )
         return {
             "attachments": attachments_list,
             "count": len(attachments_list),

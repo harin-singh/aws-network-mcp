@@ -15,8 +15,8 @@ class TestConnectivityTools:
         """Test describe_path in demo mode."""
         topology = load_demo_topology()
         result = describe_path(
-            source_ip="10.1.0.100",
-            dest_ip="10.2.0.100",
+            source_ip="10.10.0.10",
+            dest_ip="10.20.0.10",
             port=443,
             topology=topology,
         )
@@ -45,8 +45,8 @@ class TestConnectivityTools:
         """Test explain_connectivity in demo mode."""
         topology = load_demo_topology()
         result = explain_connectivity(
-            source_ip="10.1.0.100",
-            dest_ip="10.2.0.100",
+            source_ip="10.10.0.10",
+            dest_ip="10.20.0.10",
             port=443,
             topology=topology,
         )
@@ -59,8 +59,8 @@ class TestConnectivityTools:
         """Test that explain_connectivity produces readable output."""
         topology = load_demo_topology()
         result = explain_connectivity(
-            source_ip="10.1.0.100",
-            dest_ip="10.3.0.100",
+            source_ip="10.10.0.10",
+            dest_ip="10.1.0.10",
             port=443,
             topology=topology,
         )
@@ -102,7 +102,7 @@ class TestTgwTools:
         topology = load_demo_topology()
         result = tgw_route_lookup(
             tgw_route_table_id="tgw-rtb-prod-001",
-            destination_cidr="10.1.0.0/16",
+            destination_cidr="10.10.0.0/24",
             topology=topology,
         )
 
@@ -135,6 +135,7 @@ class TestDnsTools:
         assert "resolution_path" in result
         assert result["mode"] == "demo"
         assert "on-premises" in result["resolution_path"].lower()
+        assert "10.200.0.10" in result["resolution_path"]
 
     def test_check_dns_resolution_external_domain(self) -> None:
         """Test DNS resolution for external domain."""
@@ -151,7 +152,7 @@ class TestDnsTools:
         """Test that resolver endpoints are included."""
         result = check_dns_resolution(
             domain="db.internal.corp",
-            vpc_id="vpc-shared-003",
+            vpc_id="vpc-shared-001",
         )
 
         assert "resolver_endpoints" in result

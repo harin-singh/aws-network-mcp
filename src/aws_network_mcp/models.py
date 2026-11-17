@@ -11,6 +11,21 @@ from enum import StrEnum
 from typing import Literal
 
 
+def format_port_range(from_port: int | None, to_port: int | None) -> str:
+    """Format a port range for hop details. Never renders ``None-None``."""
+    if from_port is None and to_port is None:
+        return "all"
+    if from_port == -1 and to_port == -1:
+        return "all"
+    if from_port is not None and to_port is not None:
+        if from_port == to_port:
+            return str(from_port)
+        return f"{from_port}-{to_port}"
+    if from_port is not None:
+        return str(from_port)
+    return str(to_port)
+
+
 class Verdict(StrEnum):
     """Analysis verdict for a network path or rule evaluation."""
 
@@ -133,6 +148,7 @@ class TgwAttachment:
     resource_id: str
     resource_owner_id: str
     name: str | None = None
+    associated_route_table_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +198,7 @@ class VpnConnectionInfo:
     customer_gateway_ip: str
     tunnels: tuple[VpnTunnelInfo, ...]
     name: str | None = None
+    static_routes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -222,6 +239,32 @@ class ResolverEndpoint:
     name: str | None = None
 
 
+@dataclass(frozen=True)
+class FirewallRule:
+    """A single AWS Network Firewall stateful (Suricata-style) rule."""
+
+    sid: str
+    action: Literal["pass", "drop"]
+    protocol: str
+    source_cidrs: tuple[str, ...]
+    dest_cidrs: tuple[str, ...]
+    dest_negate: bool = False
+    source_negate: bool = False
+    dest_ports: tuple[str, ...] = ("any",)
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class FirewallPolicy:
+    """Network Firewall policy evaluated in STRICT_ORDER."""
+
+    policy_id: str
+    name: str
+    rule_order: Literal["STRICT_ORDER", "DEFAULT_ACTION_ORDER"]
+    default_action: str
+    rules: tuple[FirewallRule, ...]
+
+
 @dataclass
 class HopAnalysis:
     """Analysis result for a single hop in the path."""
@@ -247,6 +290,8 @@ class PathAnalysisResult:
     hops: list[HopAnalysis] = field(default_factory=list)
     summary: str = ""
     blocking_hop: HopAnalysis | None = None
+    additional_findings: list[str] = field(default_factory=list)
+    inspection_bypassed: bool = False
 
 
 @dataclass(frozen=True)
