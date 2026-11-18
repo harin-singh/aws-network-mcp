@@ -6,6 +6,17 @@ This is not a clone of AWS Labs' [`awslabs.aws-network-mcp-server`](https://gith
 
 Companion Terraform hub: [aws-hybrid-network-landing-zone](https://github.com/harin-singh/aws-hybrid-network-landing-zone).
 
+## Quick start
+
+Needs **Python 3.11+**. On macOS, `python3` is often still 3.9 — use `python3.12` (or 3.11). No AWS credentials.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+make install-dev
+make test && make demo
+```
+
 ## Analysis flow
 
 ```mermaid
@@ -30,12 +41,11 @@ flowchart TD
 
 ## Install
 
-The package is not on PyPI. Install from source:
+The package is not on PyPI. Clone, then use the [Quick start](#quick-start) (venv + `make install-dev`) so `make test` and `make demo` work.
 
 ```bash
 git clone https://github.com/harin-singh/aws-network-mcp.git
 cd aws-network-mcp
-python3 -m pip install -e .
 ```
 
 Or run the console script from git with uv:
@@ -186,8 +196,9 @@ See that repository for cost, `terraform apply`, and `scripts/test-connectivity.
 
 ## Development
 
+After the [Quick start](#quick-start) venv is active:
+
 ```bash
-python3 -m pip install -e ".[dev]"
 make lint
 make typecheck
 make test

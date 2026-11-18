@@ -1,4 +1,4 @@
-.PHONY: install dev lint typecheck test demo smoke clean all ci pre-commit
+.PHONY: install install-dev dev lint typecheck test demo smoke clean all ci pre-commit
 
 PYTHON ?= python3
 
@@ -9,6 +9,8 @@ install:
 
 dev:
 	$(PYTHON) -m pip install -e ".[dev]"
+
+install-dev: dev
 
 lint:
 	ruff check src tests
