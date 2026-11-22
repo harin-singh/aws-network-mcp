@@ -54,3 +54,6 @@ examples/terraform/.terraform.lock.hcl
 .env
 .envrc
 .python-version
+.venv/
+venv/
+env/

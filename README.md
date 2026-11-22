@@ -2,7 +2,9 @@
 
 Offline and live **hybrid path analysis** for AWS Transit Gateway hubs. Given two endpoints, the server reports each hop and the exact route or rule that allowed or dropped the flow.
 
-This is not a clone of AWS Labs' [`awslabs.aws-network-mcp-server`](https://github.com/awslabs/mcp/tree/main/src/aws-network-mcp-server). That server inventories live Cloud WAN, Transit Gateway, VPC, Network Firewall, and VPN APIs (several TGW route tools require Network Manager registration). This server evaluates a 5-tuple against Transit Gateway route tables (static, propagated, blackhole), inspection VPC / AWS Network Firewall `STRICT_ORDER` policy, security groups, NACLs, and on-prem prefixes learned over VPN or Direct Connect BGP.
+This is not a clone of AWS Labs' [`awslabs.aws-network-mcp-server`](https://github.com/awslabs/mcp/tree/main/src/aws-network-mcp-server). That server inventories live Cloud WAN, Transit Gateway, VPC, Network Firewall, and VPN APIs (several TGW route tools require Network Manager registration). 
+
+My example evaluates a 5-tuple against Transit Gateway route tables (static, propagated, blackhole), inspection VPC / AWS Network Firewall `STRICT_ORDER` policy, security groups, NACLs, and on-prem prefixes learned over VPN or Direct Connect BGP.
 
 Companion Terraform hub: [aws-hybrid-network-landing-zone](https://github.com/harin-singh/aws-hybrid-network-landing-zone).
 
